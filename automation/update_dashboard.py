@@ -48,7 +48,7 @@ def send_failure_notification(reason, details=""):
             f"Action items:\n"
             f"  1. Check Outlook Inbox for sales report email\n"
             f"  2. Run manually when email arrives:\n"
-            f"     cd C:\\Users\\IT\\Documents\\GitHub\\kfc-sales-dashboard\\automation\n"
+            f"     cd C:\\Users\\IT\\Documents\\GitHub\\tacobell-sales-dashboard\\automation\n"
             f"     .\\run_update.bat\n\n"
             f"-- KFC Sales Pipeline (auto-notification)\n"
         )
@@ -81,22 +81,22 @@ CONFIG = {
     #   το script θα δοκιμάσει εναλλακτικά paths αυτόματα.
 
     # Budget data — αυτό αλλάζει σπάνια (ίσως 1 φορά τον χρόνο)
-    "budget_source_xlsx": r"C:\Users\IT\Documents\GitHub\kfc-sales-dashboard\_work\budget_source.xlsx",
+    "budget_source_xlsx": r"C:\Users\IT\Documents\GitHub\tacobell-sales-dashboard\_work\budget_source.xlsx",
     # Όταν αλλάξει το budget v2, απλά αντικαθιστάς αυτό το αρχείο.
 
     # Git authentication (PAT)
     # Το PAT διαβάζεται από τοπικό αρχείο για ασφάλεια — δεν είναι hardcoded εδώ
-    "pat_file":         r"C:\Users\IT\Documents\GitHub\kfc-sales-dashboard\_work\.github_pat",
-    "git_user_name":    "KFC Auto-Update Bot",
-    "git_user_email":   "auto@kfc.local",
-    "github_repo":      "Reports-frt/kfc-sales-dashboard",
+    "pat_file":         r"C:\Users\IT\Documents\GitHub\tacobell-sales-dashboard\_work\.github_pat",
+    "git_user_name":    "Taco Bell Auto-Update Bot",
+    "git_user_email":   "auto@tacobell.local",
+    "github_repo":      "Reports-frt/tacobell-sales-dashboard",
 
     # Retry / verification settings
     "push_max_retries":      3,        # if push fails, retry this many times
     "push_retry_delay":      120,      # seconds between push retries
     "verify_max_attempts":   12,       # max polls of GitHub Pages CDN to confirm deploy
     "verify_poll_interval":  60,       # seconds between verify polls (12 × 60s = 12 minutes max wait)
-    "pages_url":             "https://reports-frt.github.io/kfc-sales-dashboard/data.json",
+    "pages_url":             "https://reports-frt.github.io/tacobell-sales-dashboard/data.json",
 }
 
 # ============================================================
@@ -679,11 +679,40 @@ def build_data_json(data, budget, hourly_data=None):
         }
         store_order.append(result_name)
 
-    # Map Targit names → Result names; drop unmapped
+    # Map Targit names → Result names
     data['StoreResult'] = data['Store'].apply(lambda s: targit_to_result.get(_norm(s)))
+    
+    # Auto-register unknown stores (so we don't lose data when new stores open).
+    # Uses default metadata (In Line, today's date, marked as new).
     unmapped = data[data['StoreResult'].isna()]['Store'].unique()
     if len(unmapped) > 0:
-        log.warning(f"Unmapped stores in sales data (will be skipped): {list(unmapped)}")
+        log.info(f"Auto-registering {len(unmapped)} new stores: {list(unmapped)}")
+        from datetime import date as _date
+        today_str = _date.today().isoformat()
+        for raw_name in unmapped:
+            # Clean store name for use as both ResultName and ShortLabel
+            # E.g., "TACO BELL- ΧΑΛΑΝΔΡΙ" → result "TB HALANDRI", short "ΧΑΛΑΝΔΡΙ"
+            cleaned = str(raw_name).strip()
+            # Strip brand prefix (KFC -, TACO BELL-, TB -, etc) for short label
+            short = cleaned
+            for prefix in ['TACO BELL- ', 'TACO BELL-', 'KFC - ', 'KFC- ', 'KFC-', 'TB - ', 'TB- ', 'TB-']:
+                if short.upper().startswith(prefix.upper()):
+                    short = short[len(prefix):].strip()
+                    break
+            # Use the original (cleaned) name as the Result name — preserves brand identity
+            result_name = cleaned
+            result_to_meta[result_name] = {
+                'short': short or cleaned,
+                'targit': cleaned,
+                'store_type': 'In Line',  # default — manually edit STORE_MAPPING for precise type
+                'opening_date': today_str,
+                'is_new': True,
+            }
+            store_order.append(result_name)
+            targit_to_result[_norm(cleaned)] = result_name
+            log.info(f"  + {cleaned}  →  short='{short}', opened='{today_str}' (default metadata; edit STORE_MAPPING for precise values)")
+        # Re-apply the mapping with the new entries
+        data['StoreResult'] = data['Store'].apply(lambda s: targit_to_result.get(_norm(s)))
     data = data[data['StoreResult'].notna()].copy()
 
     # Merge DELIVERAS into E-FOOD GO at parse time (DELIVERAS is essentially defunct).
@@ -752,8 +781,8 @@ def build_data_json(data, budget, hourly_data=None):
     dates = sorted({r[0] for r in records_st})
     output = {
         'meta': {
-            'latest_date':  max(dates),
-            'first_date':   min(dates),
+            'latest_date':  max(dates) if dates else None,
+            'first_date':   min(dates) if dates else None,
             'stores':       store_order,
             'salestypes':   SALESTYPE_ORDER,
             'types':        TYPE_ORDER,
@@ -1056,7 +1085,7 @@ def main():
     started = datetime.now()
     log.info("")
     log.info("#" * 60)
-    log.info(f"# KFC Dashboard Auto-Update — {started.strftime('%Y-%m-%d %H:%M:%S')}")
+    log.info(f"# Taco Bell Dashboard Auto-Update — {started.strftime('%Y-%m-%d %H:%M:%S')}")
     log.info("#" * 60)
 
     try:
@@ -1070,7 +1099,12 @@ def main():
         hourly_data = parse_hourly_data(hourly_path)
 
         # 3. Build JSON (sales + budget + optional hourly)
-        budget = load_budget(CONFIG["budget_source_xlsx"])
+        budget_path = CONFIG["budget_source_xlsx"]
+        if Path(budget_path).exists():
+            budget = load_budget(budget_path)
+        else:
+            log.info(f"STEP 3a: Budget file not found at {budget_path} - skipping (no budget data in dashboard)")
+            budget = {}
         json_data = build_data_json(sales_data, budget, hourly_data=hourly_data)
 
         # 4. Write + push (with retries)
