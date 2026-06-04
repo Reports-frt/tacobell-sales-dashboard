@@ -482,30 +482,9 @@ def parse_hourly_data(xlsx_path):
 #   "Mall Food Court"  - inside food court
 #   "Drive Through"    - dedicated drive-through location
 STORE_MAPPING = [
-    # (TargitNames, ResultName, ShortLabel, StoreType, OpeningDate, IsNewStore)
-    (["KFC - ΓΛΥΦΑΔΑ"],                                "KFC GLYFADA",         "ΓΛΥΦΑΔΑ",      "In Line",          "1998-12-11", False),
-    (["KFC - ΠΕΙΡΑΙΑ", "KFC - ΠΕΙΡΑΙΑΣ"],              "KFC PIRAEUS",         "ΠΕΙΡΑΙΑΣ",     "In Line",          "1999-06-01", False),
-    (["KFC - ΠΑΓΚΡΑΤΙ"],                               "KFC PAGRATI",         "ΠΑΓΚΡΑΤΙ",     "In Line",          "1999-12-17", False),
-    (["KFC - VILLAGE PARK (ΡΕΝΤΗΣ)", "KFC - VILLAGE PARK"], "KFC VILLAGE",    "VILLAGE",      "In Line Mall",     "2005-09-14", False),
-    (["KFC - MALL (ΜΑΡΟΥΣΙ)", "KFC - MALL"],           "KFC MALL",            "MALL",         "Mall Food Court",  "2010-06-30", False),
-    (["KFC - COSMOS"],                                 "KFC COSMOS",          "COSMOS",       "Mall Food Court",  "2010-11-30", False),
-    (["KFC - METRO MALL"],                             "KFC METROMALL",       "METROMALL",    "Mall Food Court",  "2015-05-02", False),
-    (["KFC - ΣΥΝΤΑΓΜΑ"],                               "KFC SYNTAGMA",        "ΣΥΝΤΑΓΜΑ",     "In Line",          "2019-12-19", False),
-    (["KFC - ESCAPE (ΙΛΙΟΝ)", "KFC - ESCAPE"],         "KFC ESCAPE ILION",    "ESCAPE",       "In Line Mall",     "2021-06-11", False),
-    # Latin "I" in ΚΗΦIΣΙΑ vs Greek "Ι" in ΚΗΦΙΣΙΑ — keep both
-    (["KFC - ΚΗΦIΣΙΑ", "KFC - ΚΗΦΙΣΙΑ"],               "KFC KIFISIA",         "KIFISIA",      "In Line",          "2021-06-28", False),
-    (["KFC - ΘΩΝ (ΑΜΠΕΛΟΚΗΠΟΙ)", "KFC - ΘΩΝ"],         "KFC THON",            "THON",         "In Line",          "2021-10-27", False),
-    (["KFC - RIVER WEST"],                             "KFC RIVER WEST",      "RIVER WEST",   "In Line Mall",     "2021-12-01", False),
-    (["KFC - SMART PARK"],                             "KFC SMART PARK",      "SMART PARK",   "In Line Mall",     "2022-06-22", False),
-    (["KFC - ΑΡΙΣΤΟΤΕΛΟΥΣ"],                           "KFC ΘΕΣΣΑΛΟΝΙΚΗΣ-ΑΡΙΣΤΟΤΕΛΟΥΣ", "ΑΡΙΣΤΟΤΕΛΟΥΣ", "In Line", "2022-11-16", False),
-    (["KFC - ONE SALONICA"],                           "KFC ONE SALONICA",    "ONE SALONICA", "Mall Food Court",  "2023-04-27", False),
-    (["KFC - Ν. ΣΜΥΡΝΗΣ", "KFC - Ν.ΣΜΥΡΝΗ"],           "KFC N. SMYRNI",       "Ν.ΣΜΥΡΝΗ",     "In Line",          "2023-10-26", False),
-    (["KFC - ΧΑΛΑΝΔΡΙ"],                               "KFC HALANDRI",        "ΧΑΛΑΝΔΡΙ",     "In Line",          "2023-10-23", False),
-    (["KFC - ΝΕΑ ΦΙΛΑΔΕΛΦΕΙΑ"],                        "KFC N. PHILADELPHIA", "Ν.ΦΙΛΑΔΕΛΦΕΙΑ", "In Line",         "2024-04-18", False),
-    (["KFC - ΓΕΡΑΚΑ", "KFC - ΓΕΡΑΚΑΣ"],                "KFC GERAKAS",         "ΓΕΡΑΚΑΣ",      "Drive Through",    "2024-11-14", False),
-    (["KFC - ΠΑΤΡΑ"],                                  "KFC PATRA",           "ΠΑΤΡΑ",        "In Line Mall",     "2024-12-19", False),
-    (["KFC - ΜΕΤΑΜΟΡΦΩΣΗ"],                            "KFC METAMORFOSI",     "ΜΕΤΑΜΟΡΦΩΣΗ",  "Drive Through",    "2024-12-16", False),
-    (["KFC - ΛΑΡΙΣΑ"],                                 "KFC LARISA",          "ΛΑΡΙΣΑ",       "In Line",          "2025-11-28", True),
+    # TB stores will be auto-registered from sales data on first encounter.
+    # To override defaults (store_type, opening_date, is_new), add explicit entries here:
+    # ([TargitNames], ResultName, ShortLabel, StoreType, OpeningDate, IsNewStore)
 ]
 # When new stores open or their classification changes (Same -> mature etc), edit the IsNewStore flag here.
 
@@ -695,7 +674,13 @@ def build_data_json(data, budget, hourly_data=None):
             cleaned = str(raw_name).strip()
             # Strip brand prefix (KFC -, TACO BELL-, TB -, etc) for short label
             short = cleaned
-            for prefix in ['TACO BELL- ', 'TACO BELL-', 'KFC - ', 'KFC- ', 'KFC-', 'TB - ', 'TB- ', 'TB-']:
+            # Include Greek Tau (Τ) variants — Targit sometimes uses Greek Τ instead of Latin T
+            for prefix in [
+                'TACO BELL- ', 'TACO BELL-', 'TACO BELL ',
+                'ΤACO BELL- ', 'ΤACO BELL-', 'ΤACO BELL ',  # Greek Tau
+                'KFC - ', 'KFC- ', 'KFC-', 'KFC ',
+                'TB - ', 'TB- ', 'TB-', 'TB ',
+            ]:
                 if short.upper().startswith(prefix.upper()):
                     short = short[len(prefix):].strip()
                     break
