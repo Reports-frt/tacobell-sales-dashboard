@@ -1,0 +1,3043 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>Taco Bell Greece — Food Cost Hub</title>
+
+<!-- PWA -->
+<link rel="manifest" href="../manifest.json">
+<meta name="theme-color" content="#702f8a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Taco Bell Food">
+<link rel="apple-touch-icon" href="../icon-180.png">
+<link rel="icon" type="image/png" href="../favicon.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
+<style>
+:root {
+  --bg-0: #0a0e14;
+  --bg-1: #11161e;
+  --bg-2: #1a212c;
+  --bg-3: #232b38;
+  --border: #2d3748;
+  --border-soft: #1f2733;
+  --text-0: #e8edf5;
+  --text-1: #aab4c5;
+  --text-2: #6b7689;
+  --accent: #ef4444;
+  --accent-2: #f97316;
+  --good: #22c55e;
+  --good-soft: rgba(34,197,94,0.12);
+  --bad: #ef4444;
+  --bad-soft: rgba(239,68,68,0.12);
+  --warn: #f59e0b;
+  --warn-soft: rgba(245,158,11,0.12);
+  --neutral: #64748b;
+  --kfc: #702f8a;  /* Taco Bell purple */
+  --mono: 'JetBrains Mono', 'SF Mono', 'Consolas', monospace;
+  --sans: 'Inter Tight', -apple-system, system-ui, sans-serif;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  background: var(--bg-0);
+  color: var(--text-0);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+  width: 100%;
+  overflow-x: hidden;
+}
+
+/* =====================================================================
+   PASSWORD GATE
+   ===================================================================== */
+#pwScreen {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--bg-0);
+  z-index: 1000;
+}
+.pw-box {
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 32px;
+  width: 320px;
+  text-align: center;
+  box-shadow: 0 24px 60px rgba(0,0,0,.6);
+}
+.pw-box h1 {
+  font-size: 24px;
+  letter-spacing: -0.5px;
+  margin-bottom: 6px;
+  color: var(--kfc);
+}
+.pw-box .sub {
+  font-size: 11px;
+  color: var(--text-2);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 18px;
+}
+.pw-box input {
+  width: 100%;
+  padding: 11px 14px;
+  background: var(--bg-0);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-0);
+  font-family: var(--mono);
+  font-size: 14px;
+  letter-spacing: 2px;
+  text-align: center;
+  outline: none;
+}
+.pw-box input:focus { border-color: var(--kfc); }
+.pw-box button {
+  width: 100%;
+  margin-top: 12px;
+  padding: 11px;
+  background: var(--kfc);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.pw-box button:hover { background: #c40026; }
+.pw-error {
+  color: var(--bad);
+  font-size: 11px;
+  margin-top: 8px;
+  min-height: 14px;
+  font-family: var(--mono);
+}
+
+/* =====================================================================
+   APP LAYOUT
+   ===================================================================== */
+.app {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 14px 20px 60px;
+}
+
+@media (min-width: 1024px) {
+  .app { padding: 18px 28px 80px; }
+}
+
+/* Top bar — branding + cross-nav */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  margin-bottom: 14px;
+  background: linear-gradient(180deg, rgba(228,0,43,0.1) 0%, var(--bg-1) 100%);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  position: relative;
+  overflow: hidden;
+}
+.topbar::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, var(--kfc), var(--accent-2));
+}
+.topbar .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: -0.3px;
+}
+.topbar .brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px; height: 34px;
+  background: var(--kfc);
+  border-radius: 7px;
+  color: white;
+  font-weight: 800;
+  font-size: 12px;
+  letter-spacing: 0.5px;
+}
+.topbar .brand-text { line-height: 1.1; }
+.topbar .brand-text .sub {
+  display: block;
+  font-size: 9.5px;
+  font-weight: 500;
+  color: var(--text-2);
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  margin-top: 2px;
+}
+
+.hub-switch {
+  margin-left: auto;
+  display: inline-flex;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 3px;
+  gap: 2px;
+}
+.hub-switch a {
+  padding: 6px 12px;
+  border-radius: 5px;
+  text-decoration: none;
+  color: var(--text-1);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: all 0.15s;
+}
+.hub-switch a:hover { color: var(--text-0); background: var(--bg-3); }
+.hub-switch a.active {
+  background: var(--kfc);
+  color: white;
+}
+@media (max-width: 600px) {
+  .topbar .brand-text .sub { display: none; }
+  .hub-switch a { padding: 6px 10px; font-size: 11px; }
+}
+
+/* Header KPI strip */
+.header-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 30px;
+  padding: 12px 0;
+  margin-bottom: 16px;
+}
+.header-info .info-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.header-info .label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--text-2);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+.header-info .value {
+  font-size: 16px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.2px;
+}
+
+/* Filter row */
+.filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  padding: 10px 14px;
+  background: var(--bg-1);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  margin-bottom: 18px;
+}
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.filter-group .label {
+  font-family: var(--mono);
+  font-size: 9px;
+  color: var(--text-2);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+.btn-group {
+  display: inline-flex;
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  padding: 3px;
+  gap: 3px;
+  flex-wrap: wrap;
+}
+.btn-group button {
+  padding: 6px 14px;
+  background: transparent;
+  border: none;
+  color: var(--text-1);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.btn-group button:hover { color: var(--text-0); background: var(--bg-3); }
+.btn-group button.active {
+  background: var(--kfc);
+  color: white;
+  box-shadow: 0 1px 4px rgba(228,0,43,0.3);
+}
+
+select.period-select, select.store-select {
+  padding: 6px 10px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  color: var(--text-0);
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  outline: none;
+}
+select.period-select:focus, select.store-select:focus { border-color: var(--kfc); }
+
+/* KPI cards */
+.kpi-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+@media (min-width: 768px) {
+  .kpi-row { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+}
+@media (min-width: 1280px) {
+  .kpi-row { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
+.kpi {
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 14px 16px;
+  position: relative;
+  overflow: hidden;
+}
+.kpi.theoretical { border-left-color: #3b82f6; }
+.kpi.actual      { border-left-color: var(--accent); }
+.kpi.gap.good    { border-left-color: var(--good); }
+.kpi.gap.warn    { border-left-color: var(--warn); }
+.kpi.gap.bad     { border-left-color: var(--bad); }
+.kpi.waste       { border-left-color: #a855f7; }
+.kpi.deviation.good { border-left-color: var(--good); }
+.kpi.deviation.warn { border-left-color: var(--warn); }
+.kpi.deviation.bad  { border-left-color: var(--bad); }
+.kpi.fc-pct      { border-left-color: var(--accent-2); }
+
+.kpi .label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--text-2);
+  letter-spacing: 1.3px;
+  text-transform: uppercase;
+  margin-bottom: 6px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.kpi .value {
+  font-size: 28px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.05;
+  letter-spacing: -0.8px;
+}
+.kpi .sub {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-1);
+  margin-top: 4px;
+  letter-spacing: 0.3px;
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tabs .tab {
+  padding: 11px 16px;
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-2);
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+.tabs .tab:hover { color: var(--text-0); }
+.tabs .tab.active {
+  color: var(--text-0);
+  border-bottom-color: var(--kfc);
+}
+
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Section heads */
+.section-title {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  margin: 8px 0 14px 0;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.section-title span:first-child {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+}
+.section-title .meta {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--text-2);
+  letter-spacing: 0.5px;
+  margin-left: auto;
+}
+
+/* Excel export button */
+.btn-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-1);
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: all 0.15s;
+  margin-left: 8px;
+  white-space: nowrap;
+}
+.btn-export:hover { background: var(--good); color: white; border-color: var(--good); }
+.btn-export svg { width: 12px; height: 12px; }
+
+.panel-section { margin-bottom: 28px; }
+
+/* Tables */
+.dt-wrap {
+  background: var(--bg-1);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.dt {
+  width: 100%;
+  border-collapse: collapse;
+  min-width: max-content;
+}
+.dt thead th {
+  background: var(--bg-2);
+  color: var(--text-1);
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 10px 12px;
+  text-align: right;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+/* Default: # and Store columns left-aligned for non-products tables */
+.dt:not(.dt-products) thead th:first-child,
+.dt:not(.dt-products) thead th:nth-child(2),
+.dt:not(.dt-products) tbody td:first-child,
+.dt:not(.dt-products) tbody td:nth-child(2) { text-align: left; }
+.dt thead th:first-child,
+.dt tbody td:first-child { width: 36px; }  /* narrow rank column */
+
+/* WASTE Quantity table — left-align Code, Description, Unit */
+.dt-wasteqty thead th.col-rank,
+.dt-wasteqty tbody td.col-rank { text-align: left; }
+.dt-wasteqty thead th.col-code,
+.dt-wasteqty tbody td.col-code { text-align: left; }
+.dt-wasteqty thead th.col-text,
+.dt-wasteqty tbody td.col-text { text-align: left; }
+.dt-wasteqty thead th.col-unit,
+.dt-wasteqty tbody td.col-unit { text-align: left; }
+
+/* Products table — explicit column control via classes */
+.dt-products thead th.col-rank,
+.dt-products tbody td.col-rank { text-align: left; width: 36px; }
+.dt-products thead th.col-text,
+.dt-products tbody td.col-text { text-align: left; }
+.dt-products thead th.col-tier,
+.dt-products tbody td.col-tier { text-align: left; }
+.dt thead th.sortable { cursor: pointer; user-select: none; }
+.dt thead th.sortable:hover { color: var(--text-0); }
+.dt tbody td {
+  padding: 9px 12px;
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  border-bottom: 1px solid var(--border-soft);
+  white-space: nowrap;
+  text-align: right;  /* match header default */
+}
+.dt tbody tr:hover td { background: var(--bg-2); }
+.dt tbody tr.row-grand td {
+  background: var(--bg-3);
+  font-weight: 700;
+  border-bottom: 2px solid var(--border);
+}
+.dt .pct-pos { color: var(--good); font-weight: 600; }
+.dt .pct-neg { color: var(--bad); font-weight: 600; }
+.dt .pct-flat { color: var(--text-2); }
+.dt .var-good {
+  display: inline-block;
+  padding: 2px 7px;
+  background: var(--good-soft);
+  color: var(--good);
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: var(--mono);
+}
+.dt .var-warn {
+  display: inline-block;
+  padding: 2px 7px;
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: var(--mono);
+}
+.dt .var-bad {
+  display: inline-block;
+  padding: 2px 7px;
+  background: var(--bad-soft);
+  color: var(--bad);
+  border-radius: 3px;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: var(--mono);
+}
+
+/* Mobile cards */
+.cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.card {
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  border-left: 3px solid var(--accent);
+  border-radius: 8px;
+  padding: 11px 13px;
+}
+.card.good  { border-left-color: var(--good); }
+.card.warn  { border-left-color: var(--warn); }
+.card.bad   { border-left-color: var(--bad); }
+.card.grand { background: var(--bg-3); border-left-color: var(--text-0); }
+.card .card-title {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 7px;
+}
+.card .name {
+  font-weight: 700;
+  font-size: 13px;
+}
+.card .rank {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-1);
+}
+.card .card-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.card .card-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+}
+.card .lbl { color: var(--text-2); font-family: var(--mono); letter-spacing: 0.4px; }
+.card .val {
+  color: var(--text-0);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+
+/* Trend chart */
+.chart-card {
+  background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg-1) 100%);
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  padding: 14px;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+@media (min-width: 1024px) {
+  .chart-card { padding: 18px 20px; }
+}
+.chart-card svg { display: block; min-width: 100%; height: auto; max-width: 100%; }
+
+/* Heatmap */
+.heatmap-wrap {
+  background: var(--bg-2);
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.heatmap {
+  display: grid;
+  gap: 1px;
+  background: var(--border-soft);
+  min-width: max-content;
+}
+.heat-cell {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  padding: 6px 8px;
+  text-align: right;
+  background: var(--bg-2);
+  cursor: default;
+}
+.heat-label {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--text-1);
+  background: var(--bg-3);
+  font-weight: 600;
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  white-space: nowrap;
+}
+.heat-header {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--text-2);
+  letter-spacing: 0.5px;
+  padding: 7px 4px;
+  text-align: center;
+  background: var(--bg-3);
+  font-weight: 600;
+}
+
+/* Loading state */
+#loadingOverlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg-0);
+  z-index: 999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+}
+#loadingOverlay .msg {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--text-1);
+  letter-spacing: 1px;
+}
+#loadingOverlay .spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border);
+  border-top-color: var(--kfc);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* Highlight chips for active filters */
+.chip-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  background: var(--bg-3);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  font-size: 10.5px;
+  font-family: var(--mono);
+  color: var(--text-1);
+  letter-spacing: 0.3px;
+}
+.chip.active {
+  background: rgba(228,0,43,0.15);
+  border-color: var(--kfc);
+  color: #ffb3b8;
+}
+
+/* Insight banner */
+.insight {
+  background: linear-gradient(135deg, rgba(34,197,94,0.05) 0%, rgba(34,197,94,0.02) 100%);
+  border: 1px solid rgba(34,197,94,0.2);
+  border-left: 3px solid var(--good);
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 14px;
+}
+.insight.warn {
+  background: linear-gradient(135deg, rgba(245,158,11,0.05) 0%, rgba(245,158,11,0.02) 100%);
+  border-color: rgba(245,158,11,0.2);
+  border-left-color: var(--warn);
+}
+.insight.bad {
+  background: linear-gradient(135deg, rgba(239,68,68,0.05) 0%, rgba(239,68,68,0.02) 100%);
+  border-color: rgba(239,68,68,0.2);
+  border-left-color: var(--bad);
+}
+.insight .ins-label {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  color: var(--text-2);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  margin-bottom: 3px;
+}
+.insight .ins-text {
+  font-size: 13px;
+  color: var(--text-0);
+  line-height: 1.5;
+}
+.insight strong { color: var(--text-0); font-weight: 700; }
+
+/* Mini bar */
+.mini-bar {
+  height: 5px;
+  background: var(--bg-3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.mini-bar > div {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-2), var(--kfc));
+  transition: width 0.3s;
+}
+
+/* No-data placeholder */
+.no-data {
+  padding: 30px 20px;
+  text-align: center;
+  color: var(--text-2);
+  font-size: 13px;
+}
+</style>
+</head>
+<body>
+
+<!-- Password Gate -->
+<div id="pwScreen">
+  <div class="pw-box">
+    <h1>TB</h1>
+    <div class="sub">Food Cost Hub</div>
+    <input id="pwInput" type="password" autocomplete="off" placeholder="••••••••" />
+    <button id="pwSubmit">Είσοδος</button>
+    <div id="pwError" class="pw-error"></div>
+  </div>
+</div>
+
+<!-- Loading -->
+<div id="loadingOverlay" style="display:none">
+  <div class="spinner"></div>
+  <div class="msg" id="loadingMsg">Φόρτωση δεδομένων…</div>
+</div>
+
+<!-- App -->
+<div class="app" id="appRoot" style="display:none">
+
+  <!-- Top bar with branding + hub switch -->
+  <div class="topbar">
+    <div class="brand">
+      <span class="brand-mark">TB</span>
+      <span class="brand-text">
+        Food Cost Hub
+        <span class="sub">TACO BELL GREECE — COST INTELLIGENCE</span>
+      </span>
+    </div>
+    <div class="hub-switch">
+      <a href="../index.html">Sales</a>
+      <a href="./" class="active">Food Cost</a>
+    </div>
+  </div>
+
+  <!-- Header info -->
+  <div class="header-info">
+    <div class="info-item">
+      <span class="label" id="hi1Label">Latest Period</span>
+      <span class="value" id="latestPeriod">—</span>
+    </div>
+    <div class="info-item">
+      <span class="label" id="hi2Label">Periods Covered</span>
+      <span class="value" id="periodsCount">—</span>
+    </div>
+    <div class="info-item">
+      <span class="label">Stores</span>
+      <span class="value" id="storesCount">—</span>
+    </div>
+    <div class="info-item">
+      <span class="label" id="hi4Label">Categories</span>
+      <span class="value" id="catsCount">—</span>
+    </div>
+  </div>
+
+  <!-- Filter row (only for monthly tabs) -->
+  <div class="filter-row" id="globalFilterRow">
+    <div class="filter-group">
+      <span class="label">Period</span>
+      <select id="periodSelect" class="period-select"></select>
+    </div>
+    <div class="filter-group">
+      <span class="label">Cost View</span>
+      <div class="btn-group" id="viewBtns">
+        <button class="active" data-view="pure_food">Pure Food</button>
+        <button data-view="total">Total Cost</button>
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="label">Store Filter</span>
+      <select id="storeSelect" class="store-select">
+        <option value="ALL">Όλα τα stores</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- KPI banner (only for monthly tabs) -->
+  <div class="kpi-row" id="kpiRow"></div>
+
+  <!-- Tabs -->
+  <div class="tabs">
+    <button class="tab active" data-tab="overview">Overview</button>
+    <button class="tab" data-tab="realtime">FC Tracker</button>
+    <button class="tab" data-tab="variance">GAP Analysis</button>
+    <button class="tab" data-tab="categories">Categories</button>
+    <button class="tab" data-tab="waste">WASTE Detail</button>
+    <button class="tab" data-tab="wasteqty">WASTE Quantity</button>
+    <button class="tab" data-tab="trend">Trend</button>
+    <button class="tab" data-tab="products">Products</button>
+    <button class="tab" data-tab="forecast">Forecast</button>
+  </div>
+
+  <div class="tab-content active" id="tab-overview"></div>
+  <div class="tab-content" id="tab-realtime"></div>
+  <div class="tab-content" id="tab-variance"></div>
+  <div class="tab-content" id="tab-categories"></div>
+  <div class="tab-content" id="tab-waste"></div>
+  <div class="tab-content" id="tab-wasteqty"></div>
+  <div class="tab-content" id="tab-trend"></div>
+  <div class="tab-content" id="tab-products"></div>
+  <div class="tab-content" id="tab-forecast"></div>
+
+</div>
+
+<script>
+// =====================================================================
+// PASSWORD GATE (same hash as sales)
+// =====================================================================
+const __PW_HASH__ = "901a59ce290f1a8ac51ac15eff692276dd83bf6bb39155af3fbc204086fd041f";
+
+async function sha256(text) {
+  const buf = new TextEncoder().encode(text);
+  const hashBuf = await crypto.subtle.digest('SHA-256', buf);
+  return Array.from(new Uint8Array(hashBuf))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+(function checkSession() {
+  const ok = sessionStorage.getItem('kfc_auth') === '1';
+  if (ok) {
+    document.getElementById('pwScreen').style.display = 'none';
+    bootApp();
+  }
+})();
+
+document.getElementById('pwSubmit').addEventListener('click', async () => {
+  const v = document.getElementById('pwInput').value;
+  const h = await sha256(v);
+  if (h === __PW_HASH__) {
+    sessionStorage.setItem('kfc_auth', '1');
+    document.getElementById('pwScreen').style.display = 'none';
+    bootApp();
+  } else {
+    document.getElementById('pwError').textContent = 'Λάθος κωδικός';
+  }
+});
+document.getElementById('pwInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('pwSubmit').click();
+});
+
+// =====================================================================
+// FORMATTERS
+// =====================================================================
+function fmtEur(v) {
+  if (v == null || isNaN(v)) return '—';
+  return '€' + Math.round(v).toLocaleString('el-GR');
+}
+function fmtEurK(v) {
+  if (v == null || isNaN(v)) return '—';
+  const abs = Math.abs(v);
+  const sign = v < 0 ? '-' : '';
+  if (abs >= 1000000) return sign + '€' + (abs/1000000).toFixed(2).replace('.', ',') + 'M';
+  if (abs >= 1000)    return sign + '€' + (abs/1000).toFixed(1).replace('.', ',') + 'K';
+  return sign + '€' + Math.round(abs);
+}
+function fmtPct(v, digits = 1) {
+  if (v == null || isNaN(v)) return '—';
+  return (v >= 0 ? '+' : '') + v.toFixed(digits).replace('.', ',') + '%';
+}
+function pctTag(v) {
+  if (v == null || isNaN(v)) return '<span class="pct-flat">—</span>';
+  const cls = v > 0.001 ? 'pct-pos' : (v < -0.001 ? 'pct-neg' : 'pct-flat');
+  const sign = v > 0 ? '+' : '';
+  return `<span class="${cls}">${sign}${(v*100).toFixed(1).replace('.', ',')}%</span>`;
+}
+function varTag(absVal, totalVal) {
+  if (totalVal == null || totalVal === 0 || isNaN(totalVal)) return '<span class="var-warn">—</span>';
+  const pct = (absVal / totalVal) * 100;
+  const cls = pct < 3 ? 'var-good' : (pct < 7 ? 'var-warn' : 'var-bad');
+  return `<span class="${cls}">${pct >= 0 ? '+' : ''}${pct.toFixed(1).replace('.', ',')}%</span>`;
+}
+function varClass(pct) {
+  if (pct < 3) return 'good';
+  if (pct < 7) return 'warn';
+  return 'bad';
+}
+function isDesktop() { return window.innerWidth >= 1024; }
+function periodLabel(year, month) {
+  const months = ['Ιαν','Φεβ','Μαρ','Απρ','Μάι','Ιούν','Ιούλ','Αύγ','Σεπ','Οκτ','Νοε','Δεκ'];
+  return months[month-1] + ' ' + year;
+}
+
+// =====================================================================
+// APP STATE
+// =====================================================================
+const STATE = {
+  view: 'pure_food',     // 'pure_food' | 'total'
+  period: null,           // 'YYYY-MM'
+  storeFilter: 'ALL',     // 'ALL' or specific store name
+  activeTab: 'overview',
+  // Products tab filters
+  productKind: 'all',     // 'all' | 'alc' | 'combos'
+  productCategory: 'all', // 'all' | specific category
+  productSort: 'qty',     // qty | sales | fc_pct | gm | rating
+  productSortDir: 'desc',
+};
+
+let DATA = null;
+
+// =====================================================================
+// BOOT
+// =====================================================================
+async function bootApp() {
+  document.getElementById('loadingOverlay').style.display = 'flex';
+  try {
+    const resp = await fetch('food_data.json');
+    DATA = await resp.json();
+  } catch (err) {
+    document.getElementById('loadingMsg').textContent = 'Σφάλμα φόρτωσης: ' + err.message;
+    return;
+  }
+  // Try to fetch sales data for forecast (optional — fallback gracefully if missing)
+  try {
+    const resp2 = await fetch('../data.json');
+    if (resp2.ok) {
+      DATA.sales = await resp2.json();
+      buildSalesByMonthIndex();
+    }
+  } catch (err) {
+    console.warn('Sales data not available — forecast will be limited');
+  }
+
+  // Init defaults
+  STATE.period = DATA.meta.latest_period;
+
+  // Populate UI
+  initHeader();
+  initFilters();
+  initTabs();
+  render();
+
+  document.getElementById('loadingOverlay').style.display = 'none';
+  document.getElementById('appRoot').style.display = '';
+}
+
+function initHeader() {
+  document.getElementById('latestPeriod').textContent = periodLabel(
+    parseInt(DATA.meta.latest_period.slice(0,4)),
+    parseInt(DATA.meta.latest_period.slice(5,7))
+  );
+  document.getElementById('periodsCount').textContent = DATA.meta.periods.length;
+  document.getElementById('storesCount').textContent = DATA.meta.kfc_stores.length;
+  document.getElementById('catsCount').textContent = DATA.meta.categories.length;
+}
+
+function initFilters() {
+  // Period dropdown (descending order — most recent first)
+  const sel = document.getElementById('periodSelect');
+  const periodsDesc = DATA.meta.periods.slice().reverse();
+  for (const p of periodsDesc) {
+    const opt = document.createElement('option');
+    opt.value = p;
+    const y = parseInt(p.slice(0,4));
+    const m = parseInt(p.slice(5,7));
+    opt.textContent = periodLabel(y, m);
+    sel.appendChild(opt);
+  }
+  sel.value = STATE.period;
+  sel.addEventListener('change', e => {
+    STATE.period = e.target.value;
+    render();
+  });
+
+  // Store select
+  const ssel = document.getElementById('storeSelect');
+  const stores = DATA.meta.kfc_stores.slice().sort();
+  for (const s of stores) {
+    const opt = document.createElement('option');
+    opt.value = s;
+    opt.textContent = s;
+    ssel.appendChild(opt);
+  }
+  ssel.addEventListener('change', e => {
+    STATE.storeFilter = e.target.value;
+    render();
+  });
+
+  // View toggle
+  document.querySelectorAll('#viewBtns button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      STATE.view = btn.dataset.view;
+      document.querySelectorAll('#viewBtns button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      render();
+    });
+  });
+}
+
+function updateHeaderForTab(tab) {
+  // Adapt the top header info to match active tab's data context
+  const hi1 = document.getElementById('hi1Label');
+  const hi2 = document.getElementById('hi2Label');
+  const hi4 = document.getElementById('hi4Label');
+  const valLatest = document.getElementById('latestPeriod');
+  const valPeriods = document.getElementById('periodsCount');
+  const valCats = document.getElementById('catsCount');
+  if (!hi1) return;
+  
+  // Tabs sourced from Μεικτό κέρδος (cumulative ISO 2025-2026)
+  const dailyTabs = ['realtime', 'products'];
+  const isDaily = dailyTabs.includes(tab);
+  
+  // Hide/show the global filter row (Period dropdown + Cost View + Store Filter)
+  // and the global KPI row when on daily tabs
+  const globalFilter = document.getElementById('globalFilterRow');
+  const globalKpi = document.getElementById('kpiRow');
+  if (globalFilter) globalFilter.style.display = isDaily ? 'none' : '';
+  if (globalKpi) globalKpi.style.display = isDaily ? 'none' : '';
+  
+  if (isDaily) {
+    hi1.textContent = 'FC Tracker Period';
+    valLatest.textContent = 'ISO 2025-2026';
+    hi2.textContent = 'Last Update';
+    const today = new Date();
+    valPeriods.textContent = today.toISOString().slice(0,10);
+    hi4.textContent = 'Products';
+    valCats.textContent = (DATA.realtime?.chain?.n_products) || '—';
+  } else {
+    hi1.textContent = 'Latest Period';
+    valLatest.textContent = periodLabel(
+      parseInt(DATA.meta.latest_period.slice(0,4)),
+      parseInt(DATA.meta.latest_period.slice(5,7))
+    );
+    hi2.textContent = 'Periods Covered';
+    valPeriods.textContent = DATA.meta.periods.length;
+    hi4.textContent = 'Categories';
+    valCats.textContent = DATA.meta.categories.length;
+  }
+}
+
+function initTabs() {
+  document.querySelectorAll('.tabs .tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      STATE.activeTab = btn.dataset.tab;
+      updateHeaderForTab(STATE.activeTab);
+      document.querySelectorAll('.tabs .tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+      document.getElementById('tab-' + STATE.activeTab).classList.add('active');
+      render();
+    });
+  });
+}
+
+// =====================================================================
+// DATA HELPERS
+// =====================================================================
+function getPeriodRecords(period, storeFilter='ALL') {
+  const [y, m] = period.split('-').map(Number);
+  let recs = DATA.monthly.filter(r => r.year === y && r.month === m);
+  if (storeFilter !== 'ALL') {
+    recs = recs.filter(r => r.store === storeFilter);
+  }
+  return recs;
+}
+
+function aggregateRecords(records) {
+  const view = STATE.view;
+  let ideal = 0, actual = 0, gap = 0, waste = 0;
+  let byCategory = {};
+  let byReason = {};
+
+  for (const r of records) {
+    ideal  += r[view].ideal_cost;
+    actual += r[view].total_cost;
+    gap    += r[view].other_cost;   // GAP = Total - Ideal = Other
+    waste  += r.waste.cost;          // WASTE = Reason ΦΥΡΑ
+    // Categories
+    for (const [cat, vals] of Object.entries(r.by_category)) {
+      if (!byCategory[cat]) byCategory[cat] = {ideal: 0, actual: 0, gap: 0};
+      byCategory[cat].ideal  += vals.ideal_cost;
+      byCategory[cat].actual += vals.total_cost;
+      byCategory[cat].gap    += vals.other_cost;
+    }
+    // Reasons
+    for (const [reason, val] of Object.entries(r.by_reason)) {
+      byReason[reason] = (byReason[reason] || 0) + val;
+    }
+  }
+  // DEVIATION = GAP - WASTE (the unexplained portion)
+  const deviation = gap - waste;
+  return { ideal, actual, gap, waste, deviation, byCategory, byReason };
+}
+
+function getStoreData(period, storeName) {
+  const [y, m] = period.split('-').map(Number);
+  return DATA.monthly.find(r => r.year === y && r.month === m && r.store === storeName);
+}
+
+// =====================================================================
+// RENDER (master)
+// =====================================================================
+function render() {
+  const records = getPeriodRecords(STATE.period, STATE.storeFilter);
+
+  // Render KPIs
+  renderKPIs(records);
+
+  // Render active tab
+  switch (STATE.activeTab) {
+    case 'overview':   renderOverview(records); break;
+    case 'realtime':   renderRealtime(); break;
+    case 'variance':   renderVariance(records); break;
+    case 'categories': renderCategories(records); break;
+    case 'waste':      renderWaste(records); break;
+    case 'wasteqty':   renderWasteQty(); break;
+    case 'trend':      renderTrend(); break;
+    case 'products':   renderProducts(); break;
+    case 'forecast':   renderForecast(); break;
+  }
+}
+
+// =====================================================================
+// KPI BANNER
+// =====================================================================
+function renderKPIs(records) {
+  const agg = aggregateRecords(records);
+  const gapPct = agg.ideal !== 0 ? (agg.gap / agg.ideal) * 100 : 0;
+  const wastePct = agg.actual !== 0 ? (agg.waste / agg.actual) * 100 : 0;
+  const deviationPct = agg.ideal !== 0 ? (agg.deviation / agg.ideal) * 100 : 0;
+  const gapCls = varClass(gapPct);
+  const devCls = varClass(Math.abs(deviationPct));
+
+  const html = `
+    <div class="kpi theoretical">
+      <div class="label">Theoretical (Ideal)</div>
+      <div class="value">${fmtEurK(agg.ideal)}</div>
+      <div class="sub">recipes × sales mix</div>
+    </div>
+    <div class="kpi actual">
+      <div class="label">Actual</div>
+      <div class="value">${fmtEurK(agg.actual)}</div>
+      <div class="sub">από ERP closes</div>
+    </div>
+    <div class="kpi gap ${gapCls}">
+      <div class="label">GAP</div>
+      <div class="value">${fmtEurK(agg.gap)}</div>
+      <div class="sub">${gapPct >= 0 ? '+' : ''}${gapPct.toFixed(1).replace('.', ',')}% vs ideal</div>
+    </div>
+    <div class="kpi waste">
+      <div class="label">WASTE (ΦΥΡΑ)</div>
+      <div class="value">${fmtEurK(agg.waste)}</div>
+      <div class="sub">${wastePct.toFixed(1).replace('.', ',')}% of actual · καταγεγραμμένη</div>
+    </div>
+    <div class="kpi deviation ${devCls}">
+      <div class="label">DEVIATION</div>
+      <div class="value">${fmtEurK(agg.deviation)}</div>
+      <div class="sub">${deviationPct >= 0 ? '+' : ''}${deviationPct.toFixed(1).replace('.', ',')}% · ανεξήγητο</div>
+    </div>
+  `;
+  document.getElementById('kpiRow').innerHTML = html;
+}
+
+// =====================================================================
+// TAB: OVERVIEW
+// =====================================================================
+function renderOverview(records) {
+  const root = document.getElementById('tab-overview');
+  const desktop = isDesktop();
+
+  // Per-store breakdown with GAP / WASTE / DEVIATION
+  const rows = records.map(r => {
+    const v = r[STATE.view];
+    const gap = v.other_cost;
+    const waste = r.waste.cost;
+    const deviation = gap - waste;
+    const gapPct = v.ideal_cost !== 0 ? (gap / v.ideal_cost) * 100 : 0;
+    return {
+      store: r.store,
+      ideal: v.ideal_cost,
+      actual: v.total_cost,
+      gap, gapPct, waste, deviation,
+    };
+  }).filter(r => r.ideal > 100);
+
+  rows.sort((a, b) => a.gapPct - b.gapPct);
+
+  // Insights
+  let insightsHtml = '';
+  if (rows.length > 0) {
+    const best = rows[0];
+    const worst = rows[rows.length - 1];
+    insightsHtml = `
+      <div class="insight">
+        <div class="ins-label">★ Top Performer</div>
+        <div class="ins-text"><strong>${best.store}</strong> έχει GAP <strong>${fmtPct(best.gapPct)}</strong> — ${best.gapPct < 1 ? 'εξαιρετικός έλεγχος food cost' : 'καλά ευθυγραμμισμένο με theoretical'}.</div>
+      </div>
+      <div class="insight ${worst.gapPct > 7 ? 'bad' : 'warn'}">
+        <div class="ins-label">⚠ Highest GAP</div>
+        <div class="ins-text"><strong>${worst.store}</strong> έχει <strong>${fmtPct(worst.gapPct)}</strong> GAP — €${Math.round(worst.deviation).toLocaleString('el-GR')} ανεξήγητο (deviation πέρα από καταγεγραμμένη waste).</div>
+      </div>
+    `;
+  }
+
+  let body = `
+    ${insightsHtml}
+    <div class="panel-section">
+      <div class="section-title">
+        <span>GAP Ranking — All Stores</span>
+        <span class="meta">${rows.length} stores · ${periodLabel(parseInt(STATE.period.slice(0,4)), parseInt(STATE.period.slice(5,7)))}</span>
+        <button class="btn-export" onclick="exportTable('overview')">↓ Excel</button>
+      </div>
+  `;
+
+  if (desktop) {
+    body += `<div class="dt-wrap"><table class="dt"><thead><tr>
+      <th>#</th>
+      <th>Store</th>
+      <th>Theoretical</th>
+      <th>Actual</th>
+      <th>GAP €</th>
+      <th>GAP %</th>
+      <th>WASTE</th>
+      <th>DEVIATION</th>
+    </tr></thead><tbody>`;
+
+    rows.forEach((r, i) => {
+      body += `<tr>
+        <td>${i+1}</td>
+        <td><strong>${r.store}</strong></td>
+        <td>${fmtEur(r.ideal)}</td>
+        <td>${fmtEur(r.actual)}</td>
+        <td>${r.gap > 0 ? '+' : ''}${fmtEur(r.gap)}</td>
+        <td>${varTag(r.gap, r.ideal)}</td>
+        <td>${fmtEur(r.waste)}</td>
+        <td>${r.deviation > 0 ? '+' : ''}${fmtEur(r.deviation)}</td>
+      </tr>`;
+    });
+    body += `</tbody></table></div>`;
+  } else {
+    body += `<div class="cards">`;
+    rows.forEach((r, i) => {
+      const cls = varClass(r.gapPct);
+      body += `<div class="card ${cls}">
+        <div class="card-title">
+          <span class="name">${i+1}. ${r.store}</span>
+          <span class="rank">${varTag(r.gap, r.ideal)}</span>
+        </div>
+        <div class="card-rows">
+          <div class="card-row"><span class="lbl">Theoretical</span><span class="val">${fmtEur(r.ideal)}</span></div>
+          <div class="card-row"><span class="lbl">Actual</span><span class="val">${fmtEur(r.actual)}</span></div>
+          <div class="card-row"><span class="lbl">GAP €</span><span class="val">${r.gap > 0 ? '+' : ''}${fmtEur(r.gap)}</span></div>
+          <div class="card-row"><span class="lbl">WASTE</span><span class="val">${fmtEur(r.waste)}</span></div>
+          <div class="card-row"><span class="lbl">DEVIATION</span><span class="val">${r.deviation > 0 ? '+' : ''}${fmtEur(r.deviation)}</span></div>
+        </div>
+      </div>`;
+    });
+    body += `</div>`;
+  }
+  body += `</div>`;
+
+  root.innerHTML = body;
+}
+
+// =====================================================================
+// TAB: VARIANCE ANALYSIS — Top variance ingredients per store
+// =====================================================================
+function renderVariance(records) {
+  const root = document.getElementById('tab-variance');
+  const desktop = isDesktop();
+
+  const isLatest = STATE.period === DATA.meta.latest_period;
+  let body = '';
+
+  if (!isLatest) {
+    body += `<div class="insight warn">
+      <div class="ins-label">ℹ Note</div>
+      <div class="ins-text">Το ingredient-level GAP breakdown είναι διαθέσιμο μόνο για τον <strong>τελευταίο μήνα (${periodLabel(parseInt(DATA.meta.latest_period.slice(0,4)), parseInt(DATA.meta.latest_period.slice(5,7)))})</strong>. Άλλαξε στον τελευταίο μήνα για να δεις drilldown.</div>
+    </div>`;
+  }
+
+  let stores = STATE.storeFilter === 'ALL'
+    ? Object.keys(DATA.top_variances_latest).sort()
+    : [STATE.storeFilter];
+
+  if (!isLatest) stores = [];
+
+  if (stores.length === 0 && isLatest) {
+    body += `<div class="no-data">Δεν υπάρχουν δεδομένα GAP για το επιλεγμένο φίλτρο.</div>`;
+  }
+
+  for (const store of stores) {
+    const items = DATA.top_variances_latest[store] || [];
+    if (items.length === 0) continue;
+    const totalGap = items.reduce((s, x) => s + x.other_cost, 0);
+
+    body += `<div class="panel-section">
+      <div class="section-title">
+        <span>${store}</span>
+        <span class="meta">Top ${items.length} ingredients · Total GAP: ${fmtEur(totalGap)}</span>
+        <button class="btn-export" onclick="exportTable('variance', '${store}')">↓ Excel</button>
+      </div>`;
+
+    if (desktop) {
+      body += `<div class="dt-wrap"><table class="dt"><thead><tr>
+        <th>#</th><th>Ingredient</th><th>Category</th>
+        <th>Theoretical</th><th>Actual</th>
+        <th>GAP €</th><th>% of total</th>
+      </tr></thead><tbody>`;
+      items.forEach((it, i) => {
+        const sharePct = totalGap !== 0 ? (it.other_cost / totalGap * 100) : 0;
+        body += `<tr>
+          <td>${i+1}</td>
+          <td>${it.desc}</td>
+          <td><span style="font-family:var(--mono);font-size:10.5px;color:var(--text-1)">${it.category}</span></td>
+          <td>${fmtEur(it.ideal_cost)}</td>
+          <td>${fmtEur(it.total_cost)}</td>
+          <td>${it.other_cost > 0 ? '+' : ''}${fmtEur(it.other_cost)}</td>
+          <td>${sharePct.toFixed(1).replace('.', ',')}%</td>
+        </tr>`;
+      });
+      body += `</tbody></table></div>`;
+    } else {
+      body += `<div class="cards">`;
+      items.slice(0, 10).forEach((it, i) => {
+        body += `<div class="card warn">
+          <div class="card-title">
+            <span class="name" style="font-size:12px">${i+1}. ${it.desc}</span>
+          </div>
+          <div class="card-rows">
+            <div class="card-row"><span class="lbl">Category</span><span class="val">${it.category}</span></div>
+            <div class="card-row"><span class="lbl">Theoretical</span><span class="val">${fmtEur(it.ideal_cost)}</span></div>
+            <div class="card-row"><span class="lbl">Actual</span><span class="val">${fmtEur(it.total_cost)}</span></div>
+            <div class="card-row"><span class="lbl">GAP</span><span class="val">${it.other_cost > 0 ? '+' : ''}${fmtEur(it.other_cost)}</span></div>
+          </div>
+        </div>`;
+      });
+      body += `</div>`;
+    }
+    body += `</div>`;
+  }
+  root.innerHTML = body;
+}
+
+// =====================================================================
+// TAB: CATEGORIES
+// =====================================================================
+function renderCategories(records) {
+  const root = document.getElementById('tab-categories');
+  const desktop = isDesktop();
+  const agg = aggregateRecords(records);
+
+  const cats = Object.entries(agg.byCategory)
+    .map(([cat, vals]) => ({
+      cat,
+      ideal: vals.ideal,
+      actual: vals.actual,
+      gap: vals.gap,
+      gapPct: vals.ideal !== 0 ? (vals.gap / vals.ideal * 100) : 0,
+    }))
+    .filter(c => c.ideal > 100)
+    .sort((a, b) => b.actual - a.actual);
+
+  const totalActual = cats.reduce((s, c) => s + c.actual, 0);
+
+  let body = `
+    <div class="panel-section">
+      <div class="section-title">
+        <span>Cost by Category</span>
+        <span class="meta">${cats.length} categories · ${periodLabel(parseInt(STATE.period.slice(0,4)), parseInt(STATE.period.slice(5,7)))}${STATE.storeFilter !== 'ALL' ? ' · ' + STATE.storeFilter : ''}</span>
+        <button class="btn-export" onclick="exportTable('categories')">↓ Excel</button>
+      </div>
+  `;
+
+  if (desktop) {
+    body += `<div class="dt-wrap"><table class="dt"><thead><tr>
+      <th>#</th><th>Category</th>
+      <th>Theoretical</th><th>Actual</th>
+      <th>GAP €</th><th>GAP %</th>
+      <th>Mix %</th><th></th>
+    </tr></thead><tbody>`;
+
+    cats.forEach((c, i) => {
+      const mixPct = totalActual ? (c.actual / totalActual * 100) : 0;
+      body += `<tr>
+        <td>${i+1}</td>
+        <td><strong>${c.cat}</strong></td>
+        <td>${fmtEur(c.ideal)}</td>
+        <td>${fmtEur(c.actual)}</td>
+        <td>${c.gap > 0 ? '+' : ''}${fmtEur(c.gap)}</td>
+        <td>${varTag(c.gap, c.ideal)}</td>
+        <td>${mixPct.toFixed(1).replace('.', ',')}%</td>
+        <td style="min-width:120px"><div class="mini-bar"><div style="width:${mixPct.toFixed(0)}%"></div></div></td>
+      </tr>`;
+    });
+    body += `</tbody></table></div>`;
+  } else {
+    body += `<div class="cards">`;
+    cats.forEach((c, i) => {
+      const mixPct = totalActual ? (c.actual / totalActual * 100) : 0;
+      const cls = varClass(Math.abs(c.gapPct));
+      body += `<div class="card ${cls}">
+        <div class="card-title">
+          <span class="name">${c.cat}</span>
+          <span class="rank">${mixPct.toFixed(1).replace('.', ',')}% mix</span>
+        </div>
+        <div class="card-rows">
+          <div class="card-row"><span class="lbl">Theoretical</span><span class="val">${fmtEur(c.ideal)}</span></div>
+          <div class="card-row"><span class="lbl">Actual</span><span class="val">${fmtEur(c.actual)}</span></div>
+          <div class="card-row"><span class="lbl">GAP</span><span class="val">${varTag(c.gap, c.ideal)}</span></div>
+        </div>
+      </div>`;
+    });
+    body += `</div>`;
+  }
+  body += `</div>`;
+
+  root.innerHTML = body;
+}
+
+// =====================================================================
+// TAB: WASTE (ΦΥΡΕΣ)
+// =====================================================================
+function renderWaste(records) {
+  const root = document.getElementById('tab-waste');
+  const desktop = isDesktop();
+
+  const rows = records.map(r => {
+    const v = r[STATE.view];
+    const gap = v.other_cost;
+    const waste = r.waste.cost;
+    const deviation = gap - waste;
+    return {
+      store: r.store,
+      actual: v.total_cost,
+      ideal: v.ideal_cost,
+      gap, waste, deviation,
+      wastePct: v.total_cost !== 0 ? (waste / v.total_cost * 100) : 0,
+      gapPct: v.ideal_cost !== 0 ? (gap / v.ideal_cost * 100) : 0,
+    };
+  }).filter(r => r.actual > 100);
+
+  rows.sort((a, b) => b.wastePct - a.wastePct);
+
+  const totalWaste = rows.reduce((s, r) => s + r.waste, 0);
+  const totalGap = rows.reduce((s, r) => s + r.gap, 0);
+  const totalDev = rows.reduce((s, r) => s + r.deviation, 0);
+  const totalActual = rows.reduce((s, r) => s + r.actual, 0);
+  const overallPct = totalActual !== 0 ? (totalWaste / totalActual * 100) : 0;
+
+  let body = `
+    <div class="insight ${overallPct > 3 ? 'warn' : ''}">
+      <div class="ins-label">Breakdown — GAP = WASTE + DEVIATION</div>
+      <div class="ins-text">Συνολικό GAP: <strong>${fmtEur(totalGap)}</strong>. Από αυτό, <strong>${fmtEur(totalWaste)}</strong> είναι καταγεγραμμένη φύρα (WASTE) και <strong>${fmtEur(totalDev)}</strong> είναι ανεξήγητη απόκλιση (DEVIATION).</div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-title">
+        <span>WASTE Ranking — Stores</span>
+        <span class="meta">${rows.length} stores · sorted by WASTE %</span>
+        <button class="btn-export" onclick="exportTable('waste')">↓ Excel</button>
+      </div>
+  `;
+
+  if (desktop) {
+    body += `<div class="dt-wrap"><table class="dt"><thead><tr>
+      <th>#</th>
+      <th>Store</th>
+      <th>Actual Cost</th>
+      <th>GAP €</th>
+      <th>WASTE €</th>
+      <th>WASTE %</th>
+      <th>DEVIATION €</th>
+      <th></th>
+    </tr></thead><tbody>`;
+
+    const maxPct = Math.max(...rows.map(r => r.wastePct));
+    rows.forEach((r, i) => {
+      const cls = r.wastePct < 1.5 ? 'var-good' : (r.wastePct < 3 ? 'var-warn' : 'var-bad');
+      const barW = maxPct > 0 ? (r.wastePct / maxPct * 100).toFixed(0) : 0;
+      body += `<tr>
+        <td>${i+1}</td>
+        <td><strong>${r.store}</strong></td>
+        <td>${fmtEur(r.actual)}</td>
+        <td>${r.gap > 0 ? '+' : ''}${fmtEur(r.gap)}</td>
+        <td>${fmtEur(r.waste)}</td>
+        <td><span class="${cls}">${r.wastePct.toFixed(1).replace('.', ',')}%</span></td>
+        <td>${r.deviation > 0 ? '+' : ''}${fmtEur(r.deviation)}</td>
+        <td style="min-width:120px"><div class="mini-bar"><div style="width:${barW}%"></div></div></td>
+      </tr>`;
+    });
+    body += `</tbody></table></div>`;
+  } else {
+    body += `<div class="cards">`;
+    rows.forEach((r, i) => {
+      const cls = r.wastePct < 1.5 ? 'good' : (r.wastePct < 3 ? 'warn' : 'bad');
+      body += `<div class="card ${cls}">
+        <div class="card-title">
+          <span class="name">${i+1}. ${r.store}</span>
+          <span class="rank">${r.wastePct.toFixed(1).replace('.', ',')}%</span>
+        </div>
+        <div class="card-rows">
+          <div class="card-row"><span class="lbl">Actual</span><span class="val">${fmtEur(r.actual)}</span></div>
+          <div class="card-row"><span class="lbl">GAP</span><span class="val">${r.gap > 0 ? '+' : ''}${fmtEur(r.gap)}</span></div>
+          <div class="card-row"><span class="lbl">WASTE</span><span class="val">${fmtEur(r.waste)}</span></div>
+          <div class="card-row"><span class="lbl">DEVIATION</span><span class="val">${r.deviation > 0 ? '+' : ''}${fmtEur(r.deviation)}</span></div>
+        </div>
+      </div>`;
+    });
+    body += `</div>`;
+  }
+  body += `</div>`;
+
+  root.innerHTML = body;
+}
+
+// =====================================================================
+// TAB: TREND (5-year history)
+// =====================================================================
+function renderTrend() {
+  const root = document.getElementById('tab-trend');
+  const desktop = isDesktop();
+
+  // Get all months × selected store(s)
+  const periodKeys = DATA.meta.periods;
+
+  // Build trend data
+  const series = periodKeys.map(p => {
+    const [y, m] = p.split('-').map(Number);
+    let recs = DATA.monthly.filter(r => r.year === y && r.month === m);
+    if (STATE.storeFilter !== 'ALL') {
+      recs = recs.filter(r => r.store === STATE.storeFilter);
+    }
+    let ideal = 0, actual = 0;
+    for (const r of recs) {
+      ideal += r[STATE.view].ideal_cost;
+      actual += r[STATE.view].total_cost;
+    }
+    const variancePct = ideal !== 0 ? (actual - ideal) / ideal * 100 : 0;
+    return { period: p, year: y, month: m, ideal, actual, variancePct };
+  });
+
+  // Build SVG line chart
+  const W = desktop ? 1200 : 700;
+  const H = 360;
+  const PAD = { l: 60, r: 30, t: 30, b: 50 };
+  const innerW = W - PAD.l - PAD.r;
+  const innerH = H - PAD.t - PAD.b;
+
+  const allVals = series.flatMap(s => [s.ideal, s.actual]).filter(v => v > 0);
+  const maxV = Math.max(...allVals, 1) * 1.05;
+  const xScale = i => PAD.l + (i / (series.length - 1 || 1)) * innerW;
+  const yScale = v => PAD.t + innerH - (v / maxV) * innerH;
+
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">`;
+
+  // Gridlines (4)
+  for (let i = 0; i <= 4; i++) {
+    const y = PAD.t + (innerH * i / 4);
+    const v = maxV - (maxV * i / 4);
+    svg += `<line x1="${PAD.l}" y1="${y}" x2="${W - PAD.r}" y2="${y}" stroke="var(--border-soft)" stroke-width="1"/>`;
+    svg += `<text x="${PAD.l - 8}" y="${y + 4}" text-anchor="end" fill="var(--text-2)" font-size="10" font-family="var(--mono)">${fmtEurK(v)}</text>`;
+  }
+
+  // X labels (every 6 months)
+  series.forEach((s, i) => {
+    if (i % 6 === 0 || i === series.length - 1) {
+      const x = xScale(i);
+      svg += `<text x="${x}" y="${H - 28}" text-anchor="middle" fill="var(--text-2)" font-size="10" font-family="var(--mono)">${s.year}-${String(s.month).padStart(2,'0')}</text>`;
+    }
+  });
+
+  // Theoretical area (blue)
+  let idealPath = `M ${xScale(0)} ${yScale(series[0].ideal)}`;
+  series.forEach((s, i) => {
+    if (i > 0) idealPath += ` L ${xScale(i)} ${yScale(s.ideal)}`;
+  });
+  svg += `<path d="${idealPath}" stroke="#3b82f6" stroke-width="2" fill="none"/>`;
+
+  // Actual line (red)
+  let actualPath = `M ${xScale(0)} ${yScale(series[0].actual)}`;
+  series.forEach((s, i) => {
+    if (i > 0) actualPath += ` L ${xScale(i)} ${yScale(s.actual)}`;
+  });
+  svg += `<path d="${actualPath}" stroke="${'#ef4444'}" stroke-width="2.4" fill="none"/>`;
+
+  // Dots on actual
+  series.forEach((s, i) => {
+    if (s.period === STATE.period) {
+      svg += `<circle cx="${xScale(i)}" cy="${yScale(s.actual)}" r="5" fill="#ef4444" stroke="white" stroke-width="2"/>`;
+      svg += `<text x="${xScale(i)}" y="${yScale(s.actual) - 12}" text-anchor="middle" fill="var(--text-0)" font-size="10" font-weight="700">selected</text>`;
+    }
+  });
+
+  // Legend
+  svg += `<g transform="translate(${PAD.l + 14}, ${PAD.t + 6})">
+    <rect x="0" y="0" width="14" height="3" fill="#3b82f6"/>
+    <text x="20" y="4" fill="var(--text-1)" font-size="11">Theoretical</text>
+    <rect x="100" y="0" width="14" height="3" fill="#ef4444"/>
+    <text x="120" y="4" fill="var(--text-1)" font-size="11">Actual</text>
+  </g>`;
+  svg += `</svg>`;
+
+  // Variance heatmap — months × y-axis (24 months)
+  const recentMonths = series.slice(-24);
+  let heatHtml = '<div class="heatmap-wrap"><div class="heatmap" style="grid-template-columns: 90px repeat(' + recentMonths.length + ', minmax(38px, 1fr));">';
+  heatHtml += `<div class="heat-header" style="text-align:left">VARIANCE %</div>`;
+  for (const s of recentMonths) {
+    heatHtml += `<div class="heat-header">${s.year - 2000}/${String(s.month).padStart(2,'0')}</div>`;
+  }
+  heatHtml += `<div class="heat-label">vs Theoretical</div>`;
+  for (const s of recentMonths) {
+    const pct = s.variancePct;
+    let bg = 'var(--bg-2)';
+    let col = 'var(--text-1)';
+    if (Math.abs(pct) > 0.1) {
+      const intensity = Math.min(0.85, Math.abs(pct) / 15);
+      if (pct > 0) {
+        bg = `rgba(239,68,68,${intensity.toFixed(2)})`;
+        col = intensity > 0.5 ? 'white' : 'var(--text-0)';
+      } else {
+        bg = `rgba(34,197,94,${intensity.toFixed(2)})`;
+        col = intensity > 0.5 ? 'white' : 'var(--text-0)';
+      }
+    }
+    const txt = isFinite(pct) ? (pct >= 0 ? '+' : '') + pct.toFixed(0) + '%' : '·';
+    heatHtml += `<div class="heat-cell" style="background:${bg};color:${col}" title="${s.year}-${String(s.month).padStart(2,'0')}: ${pct.toFixed(1)}%">${txt}</div>`;
+  }
+  heatHtml += `</div></div>`;
+
+  const totalPeriods = series.length;
+  const validVar = series.filter(s => s.ideal > 100).map(s => s.variancePct);
+  const avgVar = validVar.length ? validVar.reduce((a,b) => a+b, 0) / validVar.length : 0;
+
+  let body = `
+    <div class="insight">
+      <div class="ins-label">${STATE.storeFilter === 'ALL' ? 'Chain-Wide Trend' : STATE.storeFilter + ' Trend'}</div>
+      <div class="ins-text">${totalPeriods} μήνες ιστορικού (${series[0].year}-${String(series[0].month).padStart(2,'0')} → ${series[totalPeriods-1].year}-${String(series[totalPeriods-1].month).padStart(2,'0')}). Μέσο GAP: <strong>${avgVar.toFixed(1).replace('.', ',')}%</strong>.</div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-title">
+        <span>Theoretical vs Actual — Time Series</span>
+        <span class="meta">${STATE.view === 'pure_food' ? 'Pure Food' : 'Total Cost'} · ${STATE.storeFilter === 'ALL' ? 'all stores' : STATE.storeFilter}</span>
+        <button class="btn-export" onclick="exportTable('trend')">↓ Excel</button>
+      </div>
+      <div class="chart-card">${svg}</div>
+    </div>
+
+    <div class="panel-section">
+      <div class="section-title">
+        <span>Variance Heatmap (last 24 months)</span>
+        <span class="meta">πράσινο = κάτω από theoretical · κόκκινο = πάνω</span>
+      </div>
+      ${heatHtml}
+    </div>
+  `;
+
+  root.innerHTML = body;
+}
+
+
+// =====================================================================
+// PRODUCTS TAB
+// =====================================================================
+function classifyProductTier(p) {
+  // 4 tiers based on volume (rating) × margin (FC%):
+  //   Star            = high volume + high margin  (the workhorses, defend & promote)
+  //   Profitable      = low volume + high margin   (gems, push/cross-sell)
+  //   Volume Driver   = high volume + low margin   (traffic but margin work needed)
+  //   Underperformer  = low volume + low margin    (reconsider/remove)
+  // Thresholds: rating ≥ 0.5% = high volume; FC% < 25% = high margin (exclude 0% non-products)
+  const isHighVolume = p.rating >= 0.005;
+  const isHighMargin = p.fc_pct < 0.25 && p.fc_pct > 0;
+  if (isHighVolume && isHighMargin)   return { tier: 'star',           label: '⭐ Star',           cls: 'good' };
+  if (!isHighVolume && isHighMargin)  return { tier: 'profitable',     label: '💎 Profitable',     cls: 'good' };
+  if (isHighVolume && !isHighMargin)  return { tier: 'volume_driver',  label: '📦 Volume Driver',  cls: 'warn' };
+  return { tier: 'underperformer', label: '🐢 Underperformer', cls: 'bad' };
+}
+
+// Classify each product as: 'alc' | 'combos' | 'other' (taxes/freebies/dummy)
+// Combos = pre-built bundles (Buckets, Meal Boxes, Lunch Boxes, etc.)
+// Other = environmental tax, free dips, dummy codes (not real sellable items)
+// ALC = à la carte (single sellable items)
+function classifyProductKind(p) {
+  const cat = (p.category || '').toUpperCase();
+  const name = (p.product || '').toUpperCase();
+  
+  // OTHER: non-product items (φόροι, δωρεάν, dummy codes)
+  // Greek: Περιβαντολογικο Τελος = environmental fee/tax
+  // ΕΙΣΦ.ΠΡΟΣΤ.ΠΕΡΙΒ. = Environmental Protection Contribution (Greek law)
+  // NOTE: avoid matching "FREE" alone (catches "Sugar Free", "Caffeine Free" etc.)
+  // Use Greek "ΔΩΡΕΑΝ" only — it's specifically used for freebies in this dataset.
+  if (cat.includes('ΠΕΡΙΒΑΝΤΟΛΟΓΙΚΟ') || cat.includes('ΠΕΡΙΒΑΛΛΟΝΤΟΛΟΓΙΚΟ')
+      || cat.includes('DUMMY') || cat.includes('EXTRA CHARGE')
+      || name.includes('ΕΙΣΦ.') || name.startsWith('ΠΕΡΙΒ')
+      || name.includes('ΔΩΡΕΑΝ')) {
+    return 'other';
+  }
+  
+  // COMBOS: prebuilt bundles
+  if (cat.includes('BUCKET') || cat.includes('LUNCHBOX') || cat.includes('LUNCH BOX')) {
+    return 'combos';
+  }
+  if (name.includes('BUCKET') || name.includes('BOX MEAL') || name.includes('LUNCH BOX')
+      || name.includes('LUNCHBOX') || name.includes('COMBO') || name.includes('MEAL DEAL')
+      || name.includes('MEGA MIX') || name.includes('GIVE BACKET') || name.includes('VARIETY')
+      || name.includes(' BOX ') || name.endsWith(' BOX') || name.startsWith('BOX ')
+      || name.includes('FOR 2') || name.includes('FOR1') || name.includes('FOR 1')
+      || name.includes('RICE BOWL') || name.includes('GO CUP')) {
+    return 'combos';
+  }
+  return 'alc';
+}
+
+
+// =====================================================================
+// REAL-TIME TAB
+// =====================================================================
+function renderRealtime() {
+  const root = document.getElementById('tab-realtime');
+  const desktop = isDesktop();
+  
+  const rt = DATA.realtime;
+  const history = DATA.daily_history || [];
+  
+  if (!rt) {
+    root.innerHTML = `<div class="insight bad">
+      <div class="ins-label">⚠ Real-Time data not available</div>
+      <div class="ins-text">Δεν υπάρχουν realtime δεδομένα. Τρέξε το <code>build_food_data.py</code> με νεότερη έκδοση.</div>
+    </div>`;
+    return;
+  }
+  
+  let body = '';
+  
+  // ==================== HEADER BANNER ====================
+  body += `<div class="insight warn" style="margin-bottom: 14px">
+    <div class="ins-label">📅 Period: ISO Weeks 2025–2026 cumulative (από 30/12/2024 έως εχθές)</div>
+    <div class="ins-text">
+      <strong>Προσοχή:</strong> Τα νούμερα εδώ <strong>δεν</strong> είναι MTD ούτε σήμερα — είναι σύνολα ολόκληρης της περιόδου που εξάγει σήμερα το Targit (~16 μήνες).
+      Δεν συγκρίνονται με τα sales του Sales Dashboard (που τρέχει σε MTD/Week/Custom).
+      Η περίοδος αλλάζει αν ρυθμίσεις διαφορετικό range στο Targit (πχ "Last week", "Yesterday").
+      ${history.length > 1 ? `<br>Daily history: ${history.length} snapshots — βλέπεις πώς αλλάζουν τα cumulative νούμερα μέρα-μέρα.` : '<br>Daily history ξεκινά από σήμερα — από αύριο θα βλέπεις day-over-day αλλαγή.'}
+    </div>
+  </div>`;
+  
+  // ==================== KPIs ====================
+  const c = rt.chain;
+  body += `<div class="kpi-row" style="margin-bottom: 14px">
+    <div class="kpi theoretical">
+      <div class="label">Cumulative Sales</div>
+      <div class="value">${fmtEurK(c.sales)}</div>
+      <div class="sub">${c.qty.toLocaleString('el-GR')} units · ISO 2025-2026</div>
+    </div>
+    <div class="kpi actual">
+      <div class="label">Cumulative Food Cost</div>
+      <div class="value">${fmtEurK(c.fc)}</div>
+      <div class="sub">€ chain-wide</div>
+    </div>
+    <div class="kpi gap ${c.fc_pct < 0.26 ? 'good' : c.fc_pct < 0.28 ? 'warn' : 'bad'}">
+      <div class="label">Blended FC%</div>
+      <div class="value">${(c.fc_pct*100).toFixed(2).replace('.', ',')}%</div>
+      <div class="sub">${c.fc_pct < 0.26 ? '★ excellent' : c.fc_pct < 0.28 ? 'ok' : '⚠ above target'}</div>
+    </div>
+    <div class="kpi waste">
+      <div class="label">Products Tracked</div>
+      <div class="value">${c.n_products}</div>
+      <div class="sub">across ${rt.per_store.length} stores</div>
+    </div>
+  </div>`;
+  
+  // ==================== PER-STORE RANKING ====================
+  const worstStore = rt.per_store[0];
+  const bestStore = rt.per_store[rt.per_store.length-1];
+  
+  body += `<div class="insight ${worstStore.vs_chain_pp > 1 ? 'bad' : 'warn'}">
+    <div class="ins-label">★ Per-Store Insights</div>
+    <div class="ins-text">
+      Worst FC%: <strong>${worstStore.store}</strong> (${(worstStore.fc_pct*100).toFixed(2).replace('.', ',')}%, ${worstStore.vs_chain_pp >= 0 ? '+' : ''}${worstStore.vs_chain_pp.toFixed(2).replace('.', ',')}pp vs chain).
+      Best FC%: <strong>${bestStore.store}</strong> (${(bestStore.fc_pct*100).toFixed(2).replace('.', ',')}%, ${bestStore.vs_chain_pp.toFixed(2).replace('.', ',')}pp).
+      Spread: <strong>${((worstStore.fc_pct - bestStore.fc_pct) * 100).toFixed(2).replace('.', ',')}pp</strong> between best and worst — αν τους έφερνες όλους στο best, θα κέρδιζες κάμμα ~€${((c.fc_pct - bestStore.fc_pct) * c.sales).toLocaleString('el-GR', {maximumFractionDigits: 0})}.
+    </div>
+  </div>`;
+  
+  body += `<div class="panel-section">
+    <div class="section-title">
+      <span>Per-Store FC% Ranking</span>
+      <span class="meta">${rt.per_store.length} stores · ranked worst → best</span>
+      <button class="btn-export" onclick="exportTable('realtime_stores')">↓ Excel</button>
+    </div>`;
+  
+  if (desktop) {
+    body += `<div class="dt-wrap"><table class="dt"><thead><tr>
+      <th>#</th>
+      <th>Store</th>
+      <th>Sales €</th>
+      <th>FC €</th>
+      <th>FC %</th>
+      <th>vs Chain</th>
+      <th>Quantity</th>
+    </tr></thead><tbody>`;
+    rt.per_store.forEach((s, i) => {
+      const vsClass = s.vs_chain_pp > 1 ? 'var-bad' : s.vs_chain_pp > 0 ? 'var-warn' : 'var-good';
+      const rank = i + 1;
+      body += `<tr>
+        <td>${rank}</td>
+        <td><strong>${s.store}</strong></td>
+        <td>${fmtEur(s.sales)}</td>
+        <td>${fmtEur(s.fc)}</td>
+        <td>${(s.fc_pct*100).toFixed(2).replace('.', ',')}%</td>
+        <td><span class="${vsClass}" style="font-size:11px">${s.vs_chain_pp >= 0 ? '+' : ''}${s.vs_chain_pp.toFixed(2).replace('.', ',')}pp</span></td>
+        <td>${s.qty.toLocaleString('el-GR')}</td>
+      </tr>`;
+    });
+    body += `</tbody></table></div>`;
+  } else {
+    body += `<div class="cards">`;
+    rt.per_store.forEach((s, i) => {
+      const cls = s.vs_chain_pp > 1 ? 'bad' : s.vs_chain_pp > 0 ? 'warn' : 'good';
+      body += `<div class="card ${cls}">
+        <div class="card-title">
+          <span class="name">${i+1}. ${s.store}</span>
+          <span class="rank">${(s.fc_pct*100).toFixed(2).replace('.', ',')}%</span>
+        </div>
+        <div class="card-rows">
+          <div class="card-row"><span class="lbl">Sales</span><span class="val">${fmtEur(s.sales)}</span></div>
+          <div class="card-row"><span class="lbl">FC</span><span class="val">${fmtEur(s.fc)}</span></div>
+          <div class="card-row"><span class="lbl">vs Chain</span><span class="val">${s.vs_chain_pp >= 0 ? '+' : ''}${s.vs_chain_pp.toFixed(2).replace('.', ',')}pp</span></div>
+          <div class="card-row"><span class="lbl">Qty</span><span class="val">${s.qty.toLocaleString('el-GR')}</span></div>
+        </div>
+      </div>`;
+    });
+    body += `</div>`;
+  }
+  body += `</div>`;
+  
+  // ==================== HOURLY FC% PROFILE ====================
+  if (rt.hourly && rt.hourly.length > 0) {
+    body += `<div class="panel-section">
+      <div class="section-title">
+        <span>Hourly FC% Profile (Chain-Wide)</span>
+        <span class="meta">${rt.hourly.length} hours active · 02:00–10:00 excluded</span>
+      </div>`;
+    
+    // Build chart inline
+    const W = desktop ? 900 : 380;
+    const H = desktop ? 320 : 240;
+    const PAD = { l: 50, r: 30, t: 30, b: 50 };
+    const innerW = W - PAD.l - PAD.r;
+    const innerH = H - PAD.t - PAD.b;
+    
+    const fcVals = rt.hourly.map(h => h.fc_pct * 100);
+    const salesVals = rt.hourly.map(h => h.sales);
+    const minFC = Math.min(...fcVals);
+    const maxFC = Math.max(...fcVals);
+    const maxSales = Math.max(...salesVals);
+    
+    const xScale = i => PAD.l + (i / Math.max(1, rt.hourly.length - 1)) * innerW;
+    const yFC = v => PAD.t + innerH - ((v - minFC) / Math.max(0.1, maxFC - minFC)) * innerH * 0.85;
+    const yBar = v => PAD.t + innerH - (v / maxSales) * innerH * 0.6;
+    
+    let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">`;
+    
+    // Grid lines
+    svg += `<line x1="${PAD.l}" y1="${PAD.t}" x2="${PAD.l}" y2="${H-PAD.b}" stroke="var(--border)" stroke-width="1"/>`;
+    svg += `<line x1="${PAD.l}" y1="${H-PAD.b}" x2="${W-PAD.r}" y2="${H-PAD.b}" stroke="var(--border)" stroke-width="1"/>`;
+    
+    // Sales bars (light grey background)
+    rt.hourly.forEach((h, i) => {
+      const x = xScale(i);
+      const y = yBar(h.sales);
+      const barW = innerW / rt.hourly.length * 0.7;
+      svg += `<rect x="${x - barW/2}" y="${y}" width="${barW}" height="${(H-PAD.b) - y}" fill="rgba(148,163,184,0.18)" stroke="rgba(148,163,184,0.4)" stroke-width="0.5"><title>${String(h.hour).padStart(2,'0')}:00 — Sales €${h.sales.toLocaleString('el-GR', {maximumFractionDigits:0})}</title></rect>`;
+    });
+    
+    // FC% line
+    const ptsFC = rt.hourly.map((h, i) => `${xScale(i)},${yFC(h.fc_pct * 100)}`).join(' ');
+    svg += `<polyline points="${ptsFC}" fill="none" stroke="#ef4444" stroke-width="2.5"/>`;
+    
+    // FC% dots with values
+    rt.hourly.forEach((h, i) => {
+      const x = xScale(i);
+      const y = yFC(h.fc_pct * 100);
+      svg += `<circle cx="${x}" cy="${y}" r="4" fill="#ef4444"><title>${String(h.hour).padStart(2,'0')}:00 — FC% ${(h.fc_pct*100).toFixed(2)}%</title></circle>`;
+      svg += `<text x="${x}" y="${y - 8}" text-anchor="middle" fill="#ef4444" font-size="10" font-family="var(--mono)" font-weight="700">${(h.fc_pct*100).toFixed(1)}</text>`;
+    });
+    
+    // X labels
+    rt.hourly.forEach((h, i) => {
+      const x = xScale(i);
+      svg += `<text x="${x}" y="${H - PAD.b + 16}" text-anchor="middle" fill="var(--text-2)" font-size="10" font-family="var(--mono)">${String(h.hour).padStart(2,'0')}</text>`;
+    });
+    
+    // Legend
+    svg += `<g transform="translate(${PAD.l + 10}, ${PAD.t})">
+      <rect x="0" y="0" width="14" height="3" fill="#ef4444"/>
+      <text x="20" y="4" fill="var(--text-1)" font-size="11">FC%</text>
+      <rect x="80" y="-3" width="14" height="9" fill="rgba(148,163,184,0.3)"/>
+      <text x="100" y="4" fill="var(--text-1)" font-size="11">Sales (size)</text>
+    </g>`;
+    
+    svg += `</svg>`;
+    body += `<div class="chart-card">${svg}</div></div>`;
+  }
+  
+  // ==================== TOP FC CONTRIBUTORS ====================
+  if (rt.top_fc && rt.top_fc.length > 0) {
+    body += `<div class="panel-section">
+      <div class="section-title">
+        <span>Top FC Contributors</span>
+        <span class="meta">${rt.top_fc.length} products · sorted by absolute FC €</span>
+        <button class="btn-export" onclick="exportTable('realtime_topfc')">↓ Excel</button>
+      </div>`;
+    
+    if (desktop) {
+      body += `<div class="dt-wrap"><table class="dt"><thead><tr>
+        <th>#</th>
+        <th>Product</th>
+        <th>Category</th>
+        <th>Quantity</th>
+        <th>Sales €</th>
+        <th>FC €</th>
+        <th>FC %</th>
+        <th>Contribution</th>
+      </tr></thead><tbody>`;
+      rt.top_fc.forEach((p, i) => {
+        body += `<tr>
+          <td>${i+1}</td>
+          <td><strong>${p.product}</strong></td>
+          <td><span style="font-family:var(--mono);font-size:10.5px;color:var(--text-1)">${p.category}</span></td>
+          <td>${p.qty.toLocaleString('el-GR')}</td>
+          <td>${fmtEur(p.sales)}</td>
+          <td>${fmtEur(p.fc)}</td>
+          <td>${(p.fc_pct*100).toFixed(1).replace('.', ',')}%</td>
+          <td>${p.contribution_pp.toFixed(1).replace('.', ',')}%</td>
+        </tr>`;
+      });
+      body += `</tbody></table></div>`;
+    } else {
+      body += `<div class="cards">`;
+      rt.top_fc.slice(0, 10).forEach((p, i) => {
+        body += `<div class="card">
+          <div class="card-title">
+            <span class="name">${i+1}. ${p.product}</span>
+            <span class="rank">${p.contribution_pp.toFixed(1)}%</span>
+          </div>
+          <div class="card-rows">
+            <div class="card-row"><span class="lbl">FC €</span><span class="val">${fmtEur(p.fc)}</span></div>
+            <div class="card-row"><span class="lbl">FC %</span><span class="val">${(p.fc_pct*100).toFixed(1).replace('.', ',')}%</span></div>
+            <div class="card-row"><span class="lbl">Sales</span><span class="val">${fmtEur(p.sales)}</span></div>
+          </div>
+        </div>`;
+      });
+      body += `</div>`;
+    }
+    body += `</div>`;
+  }
+  
+  // ==================== DAILY HISTORY (TREND) ====================
+  if (history.length >= 2) {
+    body += `<div class="panel-section">
+      <div class="section-title">
+        <span>Daily Trend</span>
+        <span class="meta">${history.length} snapshots · day-over-day change</span>
+      </div>`;
+    
+    body += `<div class="dt-wrap"><table class="dt"><thead><tr>
+      <th>Date</th>
+      <th>Sales</th>
+      <th>FC%</th>
+      <th>Δ Sales</th>
+      <th>Δ FC% (pp)</th>
+    </tr></thead><tbody>`;
+    
+    history.slice().reverse().forEach((h, i) => {
+      const deltaCls = h.delta_fc_pp > 0.5 ? 'var-bad' : h.delta_fc_pp < -0.5 ? 'var-good' : '';
+      body += `<tr>
+        <td><strong>${h.date}</strong></td>
+        <td>${fmtEurK(h.sales)}</td>
+        <td>${(h.fc_pct*100).toFixed(2).replace('.', ',')}%</td>
+        <td>${i === history.length-1 ? '—' : (h.delta_sales >= 0 ? '+' : '') + fmtEurK(h.delta_sales)}</td>
+        <td>${i === history.length-1 ? '—' : `<span class="${deltaCls}">${h.delta_fc_pp >= 0 ? '+' : ''}${h.delta_fc_pp.toFixed(2).replace('.', ',')}</span>`}</td>
+      </tr>`;
+    });
+    body += `</tbody></table></div></div>`;
+  } else if (history.length === 1) {
+    body += `<div class="insight" style="margin-top: 14px">
+      <div class="ins-label">📅 Daily Trend (starting today)</div>
+      <div class="ins-text">
+        Πρώτο daily snapshot αποθηκεύτηκε σήμερα (${history[0].date}). Από αύριο θα έχεις day-over-day comparison.
+      </div>
+    </div>`;
+  }
+  
+  root.innerHTML = body;
+}
+
+
+// =====================================================================
+// WASTE QUANTITY TAB (από 'Quantity Per Item' sheet του FoodCost.xlsx)
+// =====================================================================
+function renderWasteQty() {
+  const root = document.getElementById('tab-wasteqty');
+  const desktop = isDesktop();
+  
+  const qpi = DATA.qty_per_item;
+  
+  if (!qpi || !qpi.items || qpi.items.length === 0) {
+    root.innerHTML = `<div class="insight">
+      <div class="ins-label">⚠ WASTE Quantity data not available</div>
+      <div class="ins-text">Δεν υπάρχουν δεδομένα από το 'Quantity Per Item' sheet του FoodCost.xlsx. Τρέξε build_food_data.py με τη νεότερη έκδοση.</div>
+    </div>`;
+    return;
+  }
+  
+  const items = qpi.items;
+  const period = qpi.period || 'unknown';
+  
+  // ==================== HEADER BANNER ====================
+  let body = `<div class="insight" style="margin-bottom: 14px">
+    <div class="ins-label">📦 WASTE Quantity — Per Ingredient Code</div>
+    <div class="ins-text">
+      Δεδομένα από το <strong>'Quantity Per Item'</strong> sheet του FoodCost.xlsx (1 sheet ανά μήνα από SAP).
+      Period: <strong>${period}</strong> · ${items.length} ingredient codes.
+      <br>
+      <strong>Ideal Qty:</strong> προβλεπόμενη κατανάλωση (αρνητικό = εξήλθε από inventory).
+      <strong>Other Qty:</strong> οτιδήποτε δεν είναι ideal (φύρα, αλλαγές, επιστροφές).
+      <strong>Total Qty:</strong> Ideal + Other = πραγματική μεταβολή inventory.
+    </div>
+  </div>`;
+  
+  // ==================== KPIs ====================
+  const totalItems = items.length;
+  const itemsWithWaste = items.filter(i => Math.abs(i.other_qty) > 0.01).length;
+  const totalIdealAbs = items.reduce((s, i) => s + Math.abs(i.ideal_qty), 0);
+  const totalOtherAbs = items.reduce((s, i) => s + Math.abs(i.other_qty), 0);
+  const overallWastePct = totalIdealAbs > 0 ? (totalOtherAbs / totalIdealAbs * 100) : 0;
+  
+  body += `<div class="kpi-row" style="margin-bottom: 14px">
+    <div class="kpi theoretical">
+      <div class="label">Ingredients Tracked</div>
+      <div class="value">${totalItems}</div>
+      <div class="sub">unique codes (${period})</div>
+    </div>
+    <div class="kpi actual">
+      <div class="label">With Waste/Other</div>
+      <div class="value">${itemsWithWaste}</div>
+      <div class="sub">${(itemsWithWaste/totalItems*100).toFixed(0)}% have non-ideal qty</div>
+    </div>
+    <div class="kpi gap ${overallWastePct < 5 ? 'good' : overallWastePct < 10 ? 'warn' : 'bad'}">
+      <div class="label">Overall Waste %</div>
+      <div class="value">${overallWastePct.toFixed(1).replace('.', ',')}%</div>
+      <div class="sub">|other| / |ideal|</div>
+    </div>
+    <div class="kpi waste">
+      <div class="label">Period</div>
+      <div class="value" style="font-size: 22px">${period}</div>
+      <div class="sub">single month snapshot</div>
+    </div>
+  </div>`;
+  
+  // ==================== FILTER + SORT ====================
+  body += `<div class="filter-row" style="margin-bottom: 14px">
+    <div class="filter-group">
+      <span class="label">Sort by</span>
+      <div class="btn-group" id="wqSortBtns">
+        <button data-wq-sort="waste_pct" ${STATE.wqSort === 'waste_pct' ? 'class="active"' : ''}>Waste %</button>
+        <button data-wq-sort="other_qty" ${STATE.wqSort === 'other_qty' ? 'class="active"' : ''}>|Other Qty|</button>
+        <button data-wq-sort="total_qty" ${STATE.wqSort === 'total_qty' ? 'class="active"' : ''}>|Total Qty|</button>
+        <button data-wq-sort="code" ${STATE.wqSort === 'code' ? 'class="active"' : ''}>Code</button>
+      </div>
+    </div>
+    <div class="filter-group" style="margin-left: auto; min-width: 280px;">
+      <span class="label">Search</span>
+      <input type="text" id="wqSearch" placeholder="Αναζήτηση κωδικού ή περιγραφής..." value="${STATE.wqSearch || ''}" 
+             style="background: var(--bg-2); border: 1px solid var(--border); color: var(--text-1); padding: 6px 10px; border-radius: 5px; font-size: 12px; height: 30px;" />
+    </div>
+  </div>`;
+  
+  // ==================== FILTER + SORT APPLICATION ====================
+  let filtered = items.slice();
+  const search = (STATE.wqSearch || '').toLowerCase().trim();
+  if (search) {
+    filtered = filtered.filter(i => 
+      i.code.toLowerCase().includes(search) || 
+      i.description.toLowerCase().includes(search)
+    );
+  }
+  const sortKey = STATE.wqSort || 'waste_pct';
+  filtered.sort((a, b) => {
+    if (sortKey === 'code') return a.code.localeCompare(b.code);
+    if (sortKey === 'waste_pct') return Math.abs(b.waste_pct) - Math.abs(a.waste_pct);
+    return Math.abs(b[sortKey]) - Math.abs(a[sortKey]);
+  });
+  
+  // ==================== TABLE ====================
+  body += `<div class="panel-section">
+    <div class="section-title">
+      <span>Ingredient List</span>
+      <span class="meta">${filtered.length} of ${totalItems} · sorted by ${sortKey}</span>
+      <button class="btn-export" onclick="exportTable('wasteqty')">↓ Excel</button>
+    </div>`;
+  
+  if (desktop) {
+    body += `<div class="dt-wrap"><table class="dt dt-wasteqty"><thead><tr>
+      <th class="col-rank">#</th>
+      <th class="col-code">Code</th>
+      <th class="col-text">Description</th>
+      <th class="col-unit">Unit</th>
+      <th>Ideal Qty</th>
+      <th>Other Qty</th>
+      <th>Total Qty</th>
+      <th>Waste %</th>
+    </tr></thead><tbody>`;
+    filtered.slice(0, 200).forEach((item, i) => {
+      const wpAbs = Math.abs(item.waste_pct * 100);
+      const wpCls = wpAbs < 5 ? 'var-good' : wpAbs < 10 ? 'var-warn' : 'var-bad';
+      body += `<tr>
+        <td class="col-rank">${i+1}</td>
+        <td class="col-code"><span style="font-family: var(--mono); color: var(--text-1)">${item.code}</span></td>
+        <td class="col-text"><strong>${item.description}</strong></td>
+        <td class="col-unit">${item.unit}</td>
+        <td>${item.ideal_qty.toLocaleString('el-GR', {maximumFractionDigits: 2})}</td>
+        <td>${item.other_qty.toLocaleString('el-GR', {maximumFractionDigits: 2})}</td>
+        <td>${item.total_qty.toLocaleString('el-GR', {maximumFractionDigits: 2})}</td>
+        <td><span class="${wpCls}">${(item.waste_pct * 100).toFixed(2).replace('.', ',')}%</span></td>
+      </tr>`;
+    });
+    body += `</tbody></table></div>`;
+    if (filtered.length > 200) {
+      body += `<div class="meta" style="text-align: center; padding: 10px">Showing 200 of ${filtered.length}. Search to narrow.</div>`;
+    }
+  } else {
+    body += `<div class="cards">`;
+    filtered.slice(0, 50).forEach((item, i) => {
+      const wpAbs = Math.abs(item.waste_pct * 100);
+      const cls = wpAbs < 5 ? 'good' : wpAbs < 10 ? 'warn' : 'bad';
+      body += `<div class="card ${cls}">
+        <div class="card-title">
+          <span class="name">${i+1}. ${item.description}</span>
+          <span class="rank">${(item.waste_pct * 100).toFixed(1)}%</span>
+        </div>
+        <div class="card-rows">
+          <div class="card-row"><span class="lbl">Code</span><span class="val">${item.code}</span></div>
+          <div class="card-row"><span class="lbl">Ideal</span><span class="val">${item.ideal_qty.toFixed(2)}</span></div>
+          <div class="card-row"><span class="lbl">Other</span><span class="val">${item.other_qty.toFixed(2)}</span></div>
+          <div class="card-row"><span class="lbl">Total</span><span class="val">${item.total_qty.toFixed(2)} ${item.unit}</span></div>
+        </div>
+      </div>`;
+    });
+    body += `</div>`;
+  }
+  body += `</div>`;
+  
+  root.innerHTML = body;
+  
+  // ==================== EVENT HANDLERS ====================
+  root.querySelectorAll('[data-wq-sort]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      STATE.wqSort = btn.dataset.wqSort;
+      renderWasteQty();
+    });
+  });
+  
+  const searchInput = document.getElementById('wqSearch');
+  if (searchInput) {
+    let searchTimer;
+    searchInput.addEventListener('input', (e) => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => {
+        STATE.wqSearch = e.target.value;
+        const cursorPos = e.target.selectionStart;
+        renderWasteQty();
+        // Restore focus + cursor
+        const newInput = document.getElementById('wqSearch');
+        if (newInput) {
+          newInput.focus();
+          newInput.setSelectionRange(cursorPos, cursorPos);
+        }
+      }, 200);
+    });
+  }
+}
+
+function renderProducts() {
+  const root = document.getElementById('tab-products');
+  const desktop = isDesktop();
+  
+  if (!DATA.product_profit || DATA.product_profit.length === 0) {
+    root.innerHTML = `<div class="insight bad">
+      <div class="ins-label">⚠ Product data not available</div>
+      <div class="ins-text">Δεν υπάρχουν product profitability δεδομένα. Έλεγξε ότι το <code>Μεικτό_κέρδος_TB.xlsx</code> είναι στο _work/ και ότι έχει τρέξει το build.</div>
+    </div>`;
+    return;
+  }
+  
+  // Annotate products with kind + tier
+  let products = DATA.product_profit.map(p => {
+    const kind = classifyProductKind(p);
+    const tier = classifyProductTier(p);
+    return { ...p, kind, ...tier };
+  });
+  
+  // Filter by kind
+  if (STATE.productKind === 'alc')         products = products.filter(p => p.kind === 'alc');
+  else if (STATE.productKind === 'combos') products = products.filter(p => p.kind === 'combos');
+  else if (STATE.productKind === 'other')  products = products.filter(p => p.kind === 'other');
+  else if (STATE.productKind === 'all')    products = products.filter(p => p.kind !== 'other');  // hide non-products from default view
+  
+  // Filter by category
+  if (STATE.productCategory !== 'all') {
+    products = products.filter(p => p.category === STATE.productCategory);
+  }
+  
+  // Filter out zero-quantity items
+  // But: keep zero-sales items in 'Other' view (freebies have qty>0 but sales=0)
+  if (STATE.productKind === 'other') {
+    products = products.filter(p => p.qty > 0);  // include €0 items
+  } else {
+    products = products.filter(p => p.qty > 0 && p.sales > 0);
+  }
+  
+  // Sort
+  const sortKey = STATE.productSort;
+  const dir = STATE.productSortDir === 'desc' ? -1 : 1;
+  products.sort((a, b) => {
+    const av = a[sortKey] || 0;
+    const bv = b[sortKey] || 0;
+    return (av - bv) * dir;
+  });
+  
+  // Compute totals
+  const totalQty = products.reduce((s, p) => s + p.qty, 0);
+  const totalSales = products.reduce((s, p) => s + p.sales, 0);
+  const totalFC = products.reduce((s, p) => s + p.fc, 0);
+  const blendedFC = totalSales ? totalFC / totalSales : 0;
+  
+  // Get unique categories for filter dropdown
+  const allCategories = [...new Set(DATA.product_profit.map(p => p.category))].sort();
+  
+  // === Period info banner (Products data is cumulative from Targit) ===
+  let body = `<div class="insight" style="margin-bottom: 14px">
+    <div class="ins-label">📅 Period: ISO Weeks 2025–2026 cumulative (από αρχή 2025 έως εχθές)</div>
+    <div class="ins-text">
+      Τα products data έρχονται aggregate για όλη τη χρονική περίοδο. 
+      Δεν φιλτράρονται από τα MTD/Week/Custom selectors των άλλων tabs.
+      <strong>Σύνολα:</strong> Αν τα νούμερα δεν δείχνουν reasonable, μπορεί να αλλαχθεί η περίοδος εξαγωγής στο Targit.
+    </div>
+  </div>`;
+
+  // === Filter row ===
+  body += `<div class="filter-row" style="margin-bottom: 14px">
+    <div class="filter-group">
+      <span class="label">Type</span>
+      <div class="btn-group" id="prodKindBtns">
+        <button data-kind="all" ${STATE.productKind === 'all' ? 'class="active"' : ''}>All</button>
+        <button data-kind="alc" ${STATE.productKind === 'alc' ? 'class="active"' : ''}>ALC</button>
+        <button data-kind="combos" ${STATE.productKind === 'combos' ? 'class="active"' : ''}>Combos</button>
+        <button data-kind="other" ${STATE.productKind === 'other' ? 'class="active"' : ''}>Φόροι/Δωρεάν</button>
+      </div>
+    </div>
+    <div class="filter-group">
+      <span class="label">Category</span>
+      <select id="prodCatSelect" class="period-select">
+        <option value="all">Όλες</option>
+        ${allCategories.map(c => `<option value="${c}" ${c === STATE.productCategory ? 'selected' : ''}>${c}</option>`).join('')}
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="label">Sort by</span>
+      <div class="btn-group" id="prodSortBtns">
+        <button data-sort="qty" ${STATE.productSort === 'qty' ? 'class="active"' : ''}>Quantity</button>
+        <button data-sort="sales" ${STATE.productSort === 'sales' ? 'class="active"' : ''}>Sales</button>
+        <button data-sort="rating" ${STATE.productSort === 'rating' ? 'class="active"' : ''}>Rating</button>
+        <button data-sort="fc_pct" ${STATE.productSort === 'fc_pct' ? 'class="active"' : ''}>FC%</button>
+        <button data-sort="avg_gm" ${STATE.productSort === 'avg_gm' ? 'class="active"' : ''}>GM €</button>
+      </div>
+    </div>
+  </div>`;
+  
+  // === KPI summary ===
+  body += `<div class="kpi-row" style="margin-bottom: 14px">
+    <div class="kpi theoretical">
+      <div class="label">Products Shown</div>
+      <div class="value">${products.length}</div>
+      <div class="sub">${({all:'πραγματικά προϊόντα', alc:'ALC only', combos:'COMBOS only', other:'ΦΟΡΟΙ/ΔΩΡΕΑΝ'}[STATE.productKind] || STATE.productKind)}</div>
+    </div>
+    <div class="kpi actual">
+      <div class="label">Total Quantity</div>
+      <div class="value">${(totalQty/1000000).toFixed(2).replace('.', ',')}M</div>
+      <div class="sub">items sold</div>
+    </div>
+    <div class="kpi gap good">
+      <div class="label">Total Sales</div>
+      <div class="value">${fmtEurK(totalSales)}</div>
+      <div class="sub">€ revenue</div>
+    </div>
+    <div class="kpi waste">
+      <div class="label">Total Food Cost</div>
+      <div class="value">${fmtEurK(totalFC)}</div>
+      <div class="sub">€ cost</div>
+    </div>
+    <div class="kpi deviation ${blendedFC < 0.25 ? 'good' : blendedFC < 0.30 ? 'warn' : 'bad'}">
+      <div class="label">Blended FC%</div>
+      <div class="value">${(blendedFC*100).toFixed(1).replace('.', ',')}%</div>
+      <div class="sub">weighted by sales</div>
+    </div>
+  </div>`;
+  
+  // === Top insight ===
+  if (products.length > 0) {
+    const best = products.reduce((b, p) => (p.avg_gm > b.avg_gm ? p : b), products[0]);
+    const worst = products.filter(p => p.fc_pct < 1).reduce((w, p) => (p.fc_pct > w.fc_pct ? p : w), products[0]);
+    body += `<div class="insight">
+      <div class="ins-label">★ Top Insights</div>
+      <div class="ins-text">
+        Best margin: <strong>${best.product}</strong> (€${best.avg_gm.toFixed(2).replace('.', ',')} GM/unit, FC% ${(best.fc_pct*100).toFixed(1).replace('.', ',')}%)
+        · Worst FC%: <strong>${worst.product}</strong> (${(worst.fc_pct*100).toFixed(1).replace('.', ',')}%)
+      </div>
+    </div>`;
+  }
+  
+  // === Main table ===
+  body += `<div class="panel-section">
+    <div class="section-title">
+      <span>Product Profitability Ranking</span>
+      <span class="meta">${products.length} products · sorted by ${STATE.productSort.toUpperCase()}</span>
+      <button class="btn-export" onclick="exportTable('products')">↓ Excel</button>
+    </div>`;
+  
+  if (desktop) {
+    body += `<div class="dt-wrap"><table class="dt dt-products"><thead><tr>
+      <th class="col-rank">#</th>
+      <th class="col-text">Product</th>
+      <th class="col-text">Category</th>
+      <th class="col-tier">Tier</th>
+      <th>Quantity</th>
+      <th>Sales €</th>
+      <th>FC €</th>
+      <th>FC %</th>
+      <th>Avg Sale</th>
+      <th>Avg GM</th>
+      <th>Rating</th>
+    </tr></thead><tbody>`;
+    products.slice(0, 100).forEach((p, i) => {
+      body += `<tr>
+        <td class="col-rank">${i+1}</td>
+        <td class="col-text"><strong>${p.product}</strong></td>
+        <td class="col-text"><span style="font-family:var(--mono);font-size:10.5px;color:var(--text-1)">${p.category}</span></td>
+        <td class="col-tier"><span class="var-${p.cls}" style="font-size:10px">${p.label}</span></td>
+        <td>${p.qty.toLocaleString('el-GR')}</td>
+        <td>${fmtEur(p.sales)}</td>
+        <td>${fmtEur(p.fc)}</td>
+        <td>${(p.fc_pct*100).toFixed(1).replace('.', ',')}%</td>
+        <td>€${p.avg_sale.toFixed(2).replace('.', ',')}</td>
+        <td>€${p.avg_gm.toFixed(2).replace('.', ',')}</td>
+        <td>${(p.rating*100).toFixed(2).replace('.', ',')}%</td>
+      </tr>`;
+    });
+    body += `</tbody></table></div>`;
+    if (products.length > 100) {
+      body += `<div class="no-data" style="padding:10px">Showing top 100 of ${products.length}. Use Excel export for full list.</div>`;
+    }
+  } else {
+    body += `<div class="cards">`;
+    products.slice(0, 50).forEach((p, i) => {
+      body += `<div class="card ${p.cls}">
+        <div class="card-title">
+          <span class="name" style="font-size:13px">${i+1}. ${p.product}</span>
+          <span class="rank" style="font-size:10px">${p.label}</span>
+        </div>
+        <div class="card-rows">
+          <div class="card-row"><span class="lbl">Category</span><span class="val">${p.category}</span></div>
+          <div class="card-row"><span class="lbl">Quantity</span><span class="val">${p.qty.toLocaleString('el-GR')}</span></div>
+          <div class="card-row"><span class="lbl">Sales</span><span class="val">${fmtEur(p.sales)}</span></div>
+          <div class="card-row"><span class="lbl">FC%</span><span class="val">${(p.fc_pct*100).toFixed(1).replace('.', ',')}%</span></div>
+          <div class="card-row"><span class="lbl">Avg GM</span><span class="val">€${p.avg_gm.toFixed(2).replace('.', ',')}</span></div>
+          <div class="card-row"><span class="lbl">Rating</span><span class="val">${(p.rating*100).toFixed(2).replace('.', ',')}%</span></div>
+        </div>
+      </div>`;
+    });
+    body += `</div>`;
+  }
+  body += `</div>`;
+  
+  // === BCG Quadrant chart ===
+  body += renderProductQuadrant(products, desktop);
+  
+  // === Methodology footer ===
+  body += `<div class="insight" style="margin-top:14px">
+    <div class="ins-label">Πώς διαβάζεται ο πίνακας</div>
+    <div class="ins-text">
+      <strong>Rating</strong> = ποσοστό συμμετοχής του προϊόντος στις συνολικές πωλήσεις σε quantity (qty share). Πιο υψηλό rating = πιο δημοφιλές.<br>
+      <strong>Tiers (Volume × Margin):</strong>
+      ⭐ <strong>Star</strong> = υψηλός όγκος + καλό margin (workhorses — defend & promote) ·
+      💎 <strong>Profitable</strong> = χαμηλός όγκος + καλό margin (gems — push & cross-sell) ·
+      📦 <strong>Volume Driver</strong> = υψηλός όγκος + χαμηλό margin (φέρνουν traffic — margin work) ·
+      🐢 <strong>Underperformer</strong> = χαμηλός όγκος + χαμηλό margin (review/remove).<br>
+      Όρια: rating ≥ 0,5% = high volume · FC% < 25% = high margin.<br>
+      Το <strong>"All"</strong> δείχνει μόνο τα <em>πραγματικά προϊόντα</em>. Τα φόροι/δωρεάν είδη (περιβαλλοντικό τέλος, dummy codes) είναι σε ξεχωριστή καρτέλα <strong>"Φόροι/Δωρεάν"</strong>.
+    </div>
+  </div>`;
+  
+  root.innerHTML = body;
+  
+  // Wire up filter handlers
+  document.querySelectorAll('#prodKindBtns button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      STATE.productKind = btn.dataset.kind;
+      renderProducts();
+    });
+  });
+  document.querySelectorAll('#prodSortBtns button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      STATE.productSort = btn.dataset.sort;
+      renderProducts();
+    });
+  });
+  document.getElementById('prodCatSelect').addEventListener('change', e => {
+    STATE.productCategory = e.target.value;
+    renderProducts();
+  });
+}
+
+function renderProductQuadrant(products, desktop) {
+  // BCG quadrant scatter plot
+  // X = log(qty) or rating (volume), Y = avg_gm (margin)
+  const W = desktop ? 900 : 360;
+  const H = desktop ? 480 : 320;
+  const PAD = { l: 60, r: 30, t: 30, b: 50 };
+  const innerW = W - PAD.l - PAD.r;
+  const innerH = H - PAD.t - PAD.b;
+  
+  const filtered = products.filter(p => p.rating > 0 && p.fc_pct > 0 && p.fc_pct < 1);
+  if (filtered.length === 0) return '';
+  
+  const maxRating = Math.max(...filtered.map(p => p.rating));
+  const maxGM = Math.max(...filtered.map(p => p.avg_gm));
+  const minGM = Math.min(...filtered.map(p => p.avg_gm), 0);
+  
+  // log scale for x (rating spread is huge)
+  const logScale = v => Math.log10(v * 10000 + 1);
+  const maxLogRating = logScale(maxRating);
+  
+  const xScale = v => PAD.l + (logScale(v) / maxLogRating) * innerW;
+  const yScale = v => PAD.t + innerH - ((v - minGM) / (maxGM - minGM)) * innerH;
+  
+  // Median lines
+  const medRating = filtered.map(p => p.rating).sort((a,b) => a-b)[Math.floor(filtered.length/2)];
+  const medGM = filtered.map(p => p.avg_gm).sort((a,b) => a-b)[Math.floor(filtered.length/2)];
+  
+  let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="xMidYMid meet">`;
+  
+  // Axes
+  svg += `<line x1="${PAD.l}" y1="${PAD.t}" x2="${PAD.l}" y2="${H - PAD.b}" stroke="var(--border)" stroke-width="1"/>`;
+  svg += `<line x1="${PAD.l}" y1="${H - PAD.b}" x2="${W - PAD.r}" y2="${H - PAD.b}" stroke="var(--border)" stroke-width="1"/>`;
+  
+  // Median crosshairs
+  svg += `<line x1="${xScale(medRating)}" y1="${PAD.t}" x2="${xScale(medRating)}" y2="${H - PAD.b}" stroke="var(--border-soft)" stroke-width="1" stroke-dasharray="3,3"/>`;
+  svg += `<line x1="${PAD.l}" y1="${yScale(medGM)}" x2="${W - PAD.r}" y2="${yScale(medGM)}" stroke="var(--border-soft)" stroke-width="1" stroke-dasharray="3,3"/>`;
+  
+  // Quadrant labels
+  const qLabels = [
+    { x: PAD.l + innerW * 0.85, y: PAD.t + 18, text: '⭐ Cash Cow', color: 'rgba(34,197,94,0.6)' },
+    { x: PAD.l + innerW * 0.15, y: PAD.t + 18, text: '🌟 Star', color: 'rgba(34,197,94,0.6)' },
+    { x: PAD.l + innerW * 0.85, y: H - PAD.b - 8, text: '❓ Question', color: 'rgba(245,158,11,0.6)' },
+    { x: PAD.l + innerW * 0.15, y: H - PAD.b - 8, text: '🐕 Dog', color: 'rgba(239,68,68,0.6)' },
+  ];
+  qLabels.forEach(q => {
+    svg += `<text x="${q.x}" y="${q.y}" text-anchor="middle" fill="${q.color}" font-size="11" font-weight="700" font-family="var(--mono)">${q.text}</text>`;
+  });
+  
+  // Plot dots
+  filtered.forEach(p => {
+    const x = xScale(p.rating);
+    const y = yScale(p.avg_gm);
+    const colorMap = { good: 'var(--good)', warn: 'var(--warn)', bad: 'var(--bad)' };
+    const color = colorMap[p.cls] || 'var(--text-1)';
+    const r = Math.max(3, Math.min(12, Math.sqrt(p.qty / 10000)));
+    svg += `<circle cx="${x}" cy="${y}" r="${r}" fill="${color}" fill-opacity="0.55" stroke="${color}" stroke-width="1"><title>${p.product} | qty=${p.qty.toLocaleString('el-GR')} | FC%=${(p.fc_pct*100).toFixed(1)}% | GM=€${p.avg_gm.toFixed(2)}</title></circle>`;
+  });
+  
+  // Axis labels
+  svg += `<text x="${PAD.l + innerW/2}" y="${H - 12}" text-anchor="middle" fill="var(--text-2)" font-size="11" font-family="var(--mono)">VOLUME (rating, log scale) →</text>`;
+  svg += `<text x="${15}" y="${PAD.t + innerH/2}" text-anchor="middle" fill="var(--text-2)" font-size="11" font-family="var(--mono)" transform="rotate(-90 15 ${PAD.t + innerH/2})">↑ MARGIN (GM €)</text>`;
+  
+  svg += `</svg>`;
+  
+  return `<div class="panel-section">
+    <div class="section-title">
+      <span>BCG Quadrant — Volume × Margin</span>
+      <span class="meta">${filtered.length} products · μέγεθος bubble = ποσότητα</span>
+    </div>
+    <div class="chart-card">${svg}</div>
+  </div>`;
+}
+
+// =====================================================================
+// FORECAST FEATURE
+// =====================================================================
+
+// Mapping food store names → sales store names (different conventions)
+const FOOD_TO_SALES_STORE = {
+  'ΓΛΥΦΑΔΑ': 'KFC GLYFADA',
+  'ΠΕΙΡΑΙΑΣ': 'KFC PIRAEUS',
+  'ΡΕΝΤΗΣ': 'KFC VILLAGE',
+  'ΠΑΓΚΡΑΤΙ': 'KFC PAGRATI',
+  'ΜΑΡΟΥΣΙ': 'KFC MALL',
+  'COSMOS': 'KFC COSMOS',
+  'ESCAPE': 'KFC ESCAPE ILION',
+  'ΚΗΦΙΣΙΑ': 'KFC KIFISIA',
+  'RIVER': 'KFC RIVER WEST',
+  'ΘΩΝ': 'KFC THON',
+  'METROMALL': 'KFC METROMALL',
+  'ΣΥΝΤΑΓΜΑ': 'KFC SYNTAGMA',
+  'SMART PARK': 'KFC SMART PARK',
+  'ONE SALONICA': 'KFC ONE SALONICA',
+  'ΑΡΙΣΤΟΤΕΛΟΥΣ': 'KFC ΘΕΣΣΑΛΟΝΙΚΗΣ-ΑΡΙΣΤΟΤΕΛΟΥΣ',
+  'Ν. ΣΜΥΡΝΗ': 'KFC N. SMYRNI',
+  'ΧΑΛΑΝΔΡΙ': 'KFC HALANDRI',
+  'ΦΙΛΑΔΕΛΦΕΙΑ': 'KFC N. PHILADELPHIA',
+  'ΓΕΡΑΚΑΣ': 'KFC GERAKAS',
+  'ΜΕΤΑΜΟΡΦΩΣΗ': 'KFC METAMORFOSI',
+  'ΠΑΤΡΑ': 'KFC PATRA',
+  'ΛΑΡΙΣΑ': 'KFC LARISA',
+};
+
+let SALES_BY_MONTH = {};   // [foodStoreName][YYYY-MM] = sales €
+
+function buildSalesByMonthIndex() {
+  if (!DATA.sales || !DATA.sales.records_st) return;
+  const stores = DATA.sales.meta.stores;
+  const tmp = {};  // [salesStoreName][YYYY-MM] = sales
+  for (const rec of DATA.sales.records_st) {
+    const [date, storeIdx, _stIdx, sales, _tcs] = rec;
+    const salesStore = stores[storeIdx];
+    const ym = date.slice(0, 7);
+    if (!tmp[salesStore]) tmp[salesStore] = {};
+    tmp[salesStore][ym] = (tmp[salesStore][ym] || 0) + sales;
+  }
+  // Map to food store names
+  for (const [foodStore, salesStore] of Object.entries(FOOD_TO_SALES_STORE)) {
+    SALES_BY_MONTH[foodStore] = tmp[salesStore] || {};
+  }
+}
+
+function getMonthlySales(foodStore, year, month) {
+  const ym = `${year}-${String(month).padStart(2,'0')}`;
+  return SALES_BY_MONTH[foodStore]?.[ym] || 0;
+}
+
+function getMonthlyBudget(foodStore, year, month) {
+  // budget keys are in salesStore names
+  const salesStore = FOOD_TO_SALES_STORE[foodStore];
+  if (!salesStore || !DATA.sales?.budget) return 0;
+  return DATA.sales.budget[salesStore]?.[String(month)]?.Sales || 0;
+}
+
+// Compute rolling FC% per store using last N months (skipping months with no data)
+function computeRollingFCpct(foodStore, asOfYear, asOfMonth, monthsBack=6) {
+  const samples = [];
+  let y = asOfYear, m = asOfMonth;
+  while (samples.length < monthsBack) {
+    const sales = getMonthlySales(foodStore, y, m);
+    const cost = getMonthlyFoodCost(foodStore, y, m);
+    if (sales > 100 && cost > 100) {
+      samples.push({y, m, sales, cost, fcPct: cost / sales});
+    }
+    m--;
+    if (m === 0) { m = 12; y--; }
+    if (y < 2022) break;
+  }
+  if (samples.length === 0) return null;
+  const avg = samples.reduce((s, x) => s + x.fcPct, 0) / samples.length;
+  return { avgPct: avg, samples };
+}
+
+function getMonthlyFoodCost(foodStore, year, month) {
+  const r = DATA.monthly.find(x => x.store === foodStore && x.year === year && x.month === month);
+  return r ? r[STATE.view].total_cost : 0;
+}
+
+// =====================================================================
+// FORECAST RENDER
+// =====================================================================
+function renderForecast() {
+  const root = document.getElementById('tab-forecast');
+  const desktop = isDesktop();
+
+  // Check sales data is available
+  if (!DATA.sales) {
+    root.innerHTML = `<div class="insight bad">
+      <div class="ins-label">⚠ Sales data not available</div>
+      <div class="ins-text">Το forecast feature χρειάζεται και sales data, αλλά δεν φόρτωσε. Πιθανώς πρόβλημα με το \`../data.json\`.</div>
+    </div>`;
+    return;
+  }
+
+  // Determine "next month" from latest food cost period
+  const [lyStr, lmStr] = DATA.meta.latest_period.split('-');
+  let ly = parseInt(lyStr), lm = parseInt(lmStr);
+  let fy = ly, fm = lm + 1;
+  if (fm > 12) { fm = 1; fy++; }
+  const forecastPeriodLabel = periodLabel(fy, fm);
+
+  // Build per-store forecast
+  const stores = STATE.storeFilter === 'ALL' ? DATA.meta.kfc_stores : [STATE.storeFilter];
+  const rows = [];
+  let totalForecast = 0, totalBudgetSales = 0, sumFCPct = 0, validStores = 0;
+
+  for (const store of stores) {
+    const fcInfo = computeRollingFCpct(store, ly, lm, 6);
+    const budgetSales = getMonthlyBudget(store, fy, fm);
+    if (!fcInfo || budgetSales < 100) continue;
+    const forecastCost = budgetSales * fcInfo.avgPct;
+    rows.push({
+      store, fcPct: fcInfo.avgPct, samples: fcInfo.samples.length,
+      budgetSales, forecastCost,
+    });
+    totalForecast += forecastCost;
+    totalBudgetSales += budgetSales;
+    sumFCPct += fcInfo.avgPct;
+    validStores++;
+  }
+  rows.sort((a, b) => b.forecastCost - a.forecastCost);
+
+  const avgFC = validStores ? sumFCPct / validStores : 0;
+  const blendedFC = totalBudgetSales ? totalForecast / totalBudgetSales : 0;
+
+  // === Insight banner ===
+  let body = `
+    <div class="insight">
+      <div class="ins-label">★ ${forecastPeriodLabel} Forecast</div>
+      <div class="ins-text">
+        Βάσει rolling 6-month historical FC% × sales budget για ${forecastPeriodLabel}:
+        <br>Predicted total food cost: <strong>${fmtEur(totalForecast)}</strong>
+        (${(blendedFC*100).toFixed(1).replace('.', ',')}% του budget) ·
+        Total budget sales: <strong>${fmtEur(totalBudgetSales)}</strong>
+      </div>
+    </div>
+  `;
+
+  // === Per-store forecast table ===
+  body += `<div class="panel-section">
+    <div class="section-title">
+      <span>Per-Store Forecast — ${forecastPeriodLabel}</span>
+      <span class="meta">${rows.length} stores · sorted by predicted cost</span>
+      <button class="btn-export" onclick="exportTable('forecast')">↓ Excel</button>
+    </div>`;
+
+  if (desktop) {
+    body += `<div class="dt-wrap"><table class="dt"><thead><tr>
+      <th>#</th><th>Store</th>
+      <th>Budget Sales</th>
+      <th>Avg FC% (6mo)</th>
+      <th>Predicted Cost</th>
+      <th>Sample size</th>
+    </tr></thead><tbody>`;
+    rows.forEach((r, i) => {
+      body += `<tr>
+        <td>${i+1}</td>
+        <td><strong>${r.store}</strong></td>
+        <td>${fmtEur(r.budgetSales)}</td>
+        <td>${(r.fcPct*100).toFixed(1).replace('.', ',')}%</td>
+        <td><strong>${fmtEur(r.forecastCost)}</strong></td>
+        <td><span style="color:var(--text-2);font-family:var(--mono);font-size:11px">${r.samples} mo</span></td>
+      </tr>`;
+    });
+    body += `</tbody></table></div>`;
+  } else {
+    body += `<div class="cards">`;
+    rows.forEach((r, i) => {
+      body += `<div class="card">
+        <div class="card-title">
+          <span class="name">${i+1}. ${r.store}</span>
+          <span class="rank">${(r.fcPct*100).toFixed(1).replace('.', ',')}%</span>
+        </div>
+        <div class="card-rows">
+          <div class="card-row"><span class="lbl">Budget Sales</span><span class="val">${fmtEur(r.budgetSales)}</span></div>
+          <div class="card-row"><span class="lbl">Predicted Cost</span><span class="val">${fmtEur(r.forecastCost)}</span></div>
+          <div class="card-row"><span class="lbl">Based on</span><span class="val">${r.samples} months</span></div>
+        </div>
+      </div>`;
+    });
+    body += `</div>`;
+  }
+  body += `</div>`;
+
+  // === Sensitivity Analysis ===
+  body += `<div class="panel-section">
+    <div class="section-title">
+      <span>Sensitivity Analysis</span>
+      <span class="meta">τι αν αλλάξουν οι πωλήσεις</span>
+    </div>`;
+
+  const scenarios = [-10, -5, 0, 5, 10];
+  if (desktop) {
+    body += `<div class="dt-wrap"><table class="dt"><thead><tr>
+      <th>Scenario</th><th>Sales Δ</th>
+      <th>Predicted Sales</th><th>Predicted Cost</th>
+      <th>Δ vs Base</th>
+    </tr></thead><tbody>`;
+    for (const s of scenarios) {
+      const adjSales = totalBudgetSales * (1 + s/100);
+      const adjCost = adjSales * blendedFC;
+      const delta = adjCost - totalForecast;
+      const cls = s < 0 ? 'pct-neg' : (s > 0 ? 'pct-pos' : 'pct-flat');
+      body += `<tr>
+        <td><strong>${s === 0 ? 'Base case' : (s > 0 ? `Optimistic +${s}%` : `Pessimistic ${s}%`)}</strong></td>
+        <td><span class="${cls}">${s > 0 ? '+' : ''}${s}%</span></td>
+        <td>${fmtEur(adjSales)}</td>
+        <td>${fmtEur(adjCost)}</td>
+        <td>${delta > 0 ? '+' : ''}${fmtEur(delta)}</td>
+      </tr>`;
+    }
+    body += `</tbody></table></div>`;
+  } else {
+    body += `<div class="cards">`;
+    for (const s of scenarios) {
+      const adjSales = totalBudgetSales * (1 + s/100);
+      const adjCost = adjSales * blendedFC;
+      const delta = adjCost - totalForecast;
+      body += `<div class="card">
+        <div class="card-title">
+          <span class="name">${s === 0 ? 'Base case' : (s > 0 ? `+${s}% sales` : `${s}% sales`)}</span>
+        </div>
+        <div class="card-rows">
+          <div class="card-row"><span class="lbl">Predicted Sales</span><span class="val">${fmtEur(adjSales)}</span></div>
+          <div class="card-row"><span class="lbl">Predicted Cost</span><span class="val">${fmtEur(adjCost)}</span></div>
+          <div class="card-row"><span class="lbl">Δ vs Base</span><span class="val">${delta > 0 ? '+' : ''}${fmtEur(delta)}</span></div>
+        </div>
+      </div>`;
+    }
+    body += `</div>`;
+  }
+  body += `</div>`;
+
+  // === Methodology footer ===
+  body += `<div class="insight" style="margin-top:14px">
+    <div class="ins-label">Πώς υπολογίζεται</div>
+    <div class="ins-text">
+      <strong>1.</strong> Παίρνουμε το rolling 6-month average FC% (Actual Cost / Actual Sales) για κάθε store, βάσει ιστορικών δεδομένων.
+      <strong>2.</strong> Πολλαπλασιάζουμε με το <strong>budget sales</strong> για ${forecastPeriodLabel}.
+      <strong>3.</strong> Αυτό είναι το predicted food cost.
+      <br><br>
+      <strong>Καλύτερη πρόβλεψη όταν:</strong> το store έχει σταθερό FC% (όχι μεγάλη μεταβολή τους τελευταίους μήνες).
+      <strong>Λιγότερο αξιόπιστη όταν:</strong> νέα stores με <6 μήνες ιστορικό, ή stores με μεγάλη μεταβλητότητα.
+    </div>
+  </div>`;
+
+  root.innerHTML = body;
+}
+
+// =====================================================================
+// EXCEL EXPORT
+// =====================================================================
+function exportTable(tabName, contextStore) {
+  if (typeof XLSX === 'undefined') {
+    alert('Excel library δεν φόρτωσε. Δοκίμασε refresh.');
+    return;
+  }
+  const records = getPeriodRecords(STATE.period, STATE.storeFilter);
+  const periodStr = periodLabel(parseInt(STATE.period.slice(0,4)), parseInt(STATE.period.slice(5,7)));
+  const viewLabel = STATE.view === 'pure_food' ? 'Pure Food' : 'Total Cost';
+  
+  let aoa = [];
+  let sheetName = '';
+  let filenameSuffix = '';
+  
+  if (tabName === 'overview') {
+    sheetName = 'GAP Ranking';
+    filenameSuffix = 'GAP_Ranking';
+    aoa.push(['Period', STATE.period, 'View', viewLabel, 'Store filter', STATE.storeFilter]);
+    aoa.push([]);
+    aoa.push(['#','Store','Theoretical','Actual','GAP €','GAP %','WASTE €','DEVIATION €']);
+    const rows = records.map(r => {
+      const v = r[STATE.view];
+      const gap = v.other_cost;
+      const waste = r.waste.cost;
+      return {
+        store: r.store, ideal: v.ideal_cost, actual: v.total_cost,
+        gap, waste, deviation: gap - waste,
+        gapPct: v.ideal_cost ? gap/v.ideal_cost*100 : 0,
+      };
+    }).filter(r => r.ideal > 100).sort((a,b) => a.gapPct - b.gapPct);
+    rows.forEach((r,i) => aoa.push([
+      i+1, r.store, r.ideal, r.actual, r.gap, r.gapPct/100, r.waste, r.deviation
+    ]));
+  }
+  else if (tabName === 'variance') {
+    sheetName = 'GAP Analysis';
+    filenameSuffix = 'GAP_Analysis_' + (contextStore || 'all');
+    aoa.push(['Period', STATE.period, 'Store', contextStore || 'all']);
+    aoa.push([]);
+    aoa.push(['#','Ingredient','Category','Theoretical','Actual','GAP €','% of total']);
+    const stores = contextStore ? [contextStore] : Object.keys(DATA.top_variances_latest).sort();
+    for (const store of stores) {
+      const items = DATA.top_variances_latest[store] || [];
+      if (items.length === 0) continue;
+      if (stores.length > 1) {
+        aoa.push([]); aoa.push([`=== ${store} ===`]);
+      }
+      const totalGap = items.reduce((s,x) => s+x.other_cost, 0);
+      items.forEach((it,i) => aoa.push([
+        i+1, it.desc, it.category,
+        it.ideal_cost, it.total_cost, it.other_cost,
+        totalGap ? it.other_cost/totalGap : 0
+      ]));
+    }
+  }
+  else if (tabName === 'categories') {
+    sheetName = 'Categories';
+    filenameSuffix = 'Categories';
+    aoa.push(['Period', STATE.period, 'View', viewLabel, 'Store filter', STATE.storeFilter]);
+    aoa.push([]);
+    aoa.push(['#','Category','Theoretical','Actual','GAP €','GAP %','Mix %']);
+    const agg = aggregateRecords(records);
+    const cats = Object.entries(agg.byCategory)
+      .map(([cat, vals]) => ({
+        cat, ideal: vals.ideal, actual: vals.actual, gap: vals.gap,
+        gapPct: vals.ideal ? vals.gap/vals.ideal*100 : 0,
+      }))
+      .filter(c => c.ideal > 100).sort((a,b) => b.actual - a.actual);
+    const totalActual = cats.reduce((s,c) => s + c.actual, 0);
+    cats.forEach((c,i) => aoa.push([
+      i+1, c.cat, c.ideal, c.actual, c.gap, c.gapPct/100,
+      totalActual ? c.actual/totalActual : 0
+    ]));
+  }
+  else if (tabName === 'waste') {
+    sheetName = 'WASTE Detail';
+    filenameSuffix = 'WASTE_Detail';
+    aoa.push(['Period', STATE.period, 'View', viewLabel, 'Store filter', STATE.storeFilter]);
+    aoa.push([]);
+    aoa.push(['#','Store','Actual Cost','GAP €','WASTE €','WASTE %','DEVIATION €']);
+    const rows = records.map(r => {
+      const v = r[STATE.view];
+      const gap = v.other_cost;
+      const waste = r.waste.cost;
+      return {
+        store: r.store, actual: v.total_cost, gap, waste,
+        deviation: gap - waste,
+        wastePct: v.total_cost ? waste/v.total_cost*100 : 0,
+      };
+    }).filter(r => r.actual > 100).sort((a,b) => b.wastePct - a.wastePct);
+    rows.forEach((r,i) => aoa.push([
+      i+1, r.store, r.actual, r.gap, r.waste, r.wastePct/100, r.deviation
+    ]));
+  }
+  else if (tabName === 'wasteqty') {
+    sheetName = 'WASTE Quantity';
+    filenameSuffix = 'WASTE_Qty';
+    aoa.push(['#', 'Code', 'Description', 'Unit', 'Ideal Qty', 'Other Qty', 'Total Qty', 'Waste %']);
+    const items = (DATA.qty_per_item?.items || []).slice();
+    const sk = STATE.wqSort || 'waste_pct';
+    const sd = (STATE.wqSearch || '').toLowerCase().trim();
+    const filt = sd ? items.filter(i => i.code.toLowerCase().includes(sd) || i.description.toLowerCase().includes(sd)) : items;
+    filt.sort((a, b) => {
+      if (sk === 'code') return a.code.localeCompare(b.code);
+      if (sk === 'waste_pct') return Math.abs(b.waste_pct) - Math.abs(a.waste_pct);
+      return Math.abs(b[sk]) - Math.abs(a[sk]);
+    });
+    filt.forEach((item, i) => {
+      aoa.push([i+1, item.code, item.description, item.unit, item.ideal_qty, item.other_qty, item.total_qty, item.waste_pct]);
+    });
+  }
+  else if (tabName === 'realtime_stores') {
+    sheetName = 'Realtime Stores';
+    filenameSuffix = 'RT_Stores';
+    aoa.push(['#','Store','Sales','FC','FC%','vs Chain pp','Quantity']);
+    (DATA.realtime?.per_store || []).forEach((s, i) => {
+      aoa.push([i+1, s.store, s.sales, s.fc, s.fc_pct, s.vs_chain_pp, s.qty]);
+    });
+  }
+  else if (tabName === 'realtime_topfc') {
+    sheetName = 'Top FC';
+    filenameSuffix = 'RT_TopFC';
+    aoa.push(['#','Product','Category','Qty','Sales','FC','FC%','Contribution %']);
+    (DATA.realtime?.top_fc || []).forEach((p, i) => {
+      aoa.push([i+1, p.product, p.category, p.qty, p.sales, p.fc, p.fc_pct, p.contribution_pp]);
+    });
+  }
+  else if (tabName === 'products') {
+    sheetName = 'Products';
+    filenameSuffix = `Products_${STATE.productKind}`;
+    aoa.push(['Filter', `Kind=${STATE.productKind} · Category=${STATE.productCategory}`, 'Sort', STATE.productSort]);
+    aoa.push([]);
+    aoa.push(['#','Product','Category','Tier','Quantity','Sales','FC','FC%','Avg Sale','Avg GM','Rating']);
+    let products = (DATA.product_profit || []).map(p => ({...p, kind: classifyProductKind(p), ...classifyProductTier(p)}));
+    if (STATE.productKind !== 'all') products = products.filter(p => p.kind === STATE.productKind);
+    if (STATE.productCategory !== 'all') products = products.filter(p => p.category === STATE.productCategory);
+    products = products.filter(p => p.qty > 0 && p.sales > 0);
+    const dir = STATE.productSortDir === 'desc' ? -1 : 1;
+    products.sort((a, b) => ((a[STATE.productSort] || 0) - (b[STATE.productSort] || 0)) * dir);
+    products.forEach((p, i) => aoa.push([
+      i+1, p.product, p.category, p.label,
+      p.qty, p.sales, p.fc, p.fc_pct,
+      p.avg_sale, p.avg_gm, p.rating
+    ]));
+  }
+  else if (tabName === 'forecast') {
+    sheetName = 'Forecast';
+    // Reuse the logic from renderForecast
+    const [lyStr, lmStr] = DATA.meta.latest_period.split('-');
+    let ly = parseInt(lyStr), lm = parseInt(lmStr);
+    let fy = ly, fm = lm + 1;
+    if (fm > 12) { fm = 1; fy++; }
+    const forecastPeriod = `${fy}-${String(fm).padStart(2,'0')}`;
+    filenameSuffix = 'Forecast_' + forecastPeriod;
+    aoa.push(['Forecast for', forecastPeriod, 'Based on', 'Rolling 6-month FC%', 'View', viewLabel]);
+    aoa.push([]);
+    aoa.push(['#','Store','Budget Sales','Avg FC% (6mo)','Predicted Cost','Sample months']);
+    
+    const stores = STATE.storeFilter === 'ALL' ? DATA.meta.kfc_stores : [STATE.storeFilter];
+    const rows = [];
+    for (const store of stores) {
+      const fcInfo = computeRollingFCpct(store, ly, lm, 6);
+      const budgetSales = getMonthlyBudget(store, fy, fm);
+      if (!fcInfo || budgetSales < 100) continue;
+      rows.push({
+        store, fcPct: fcInfo.avgPct, samples: fcInfo.samples.length,
+        budgetSales, forecastCost: budgetSales * fcInfo.avgPct,
+      });
+    }
+    rows.sort((a, b) => b.forecastCost - a.forecastCost);
+    rows.forEach((r,i) => aoa.push([
+      i+1, r.store, r.budgetSales, r.fcPct, r.forecastCost, r.samples
+    ]));
+  }
+  else if (tabName === 'trend') {
+    sheetName = 'Trend';
+    filenameSuffix = 'Trend';
+    aoa.push(['View', viewLabel, 'Store filter', STATE.storeFilter]);
+    aoa.push([]);
+    aoa.push(['Period','Year','Month','Theoretical','Actual','GAP €','GAP %']);
+    const periodKeys = DATA.meta.periods;
+    for (const p of periodKeys) {
+      const [y, m] = p.split('-').map(Number);
+      let recs = DATA.monthly.filter(r => r.year === y && r.month === m);
+      if (STATE.storeFilter !== 'ALL') recs = recs.filter(r => r.store === STATE.storeFilter);
+      let ideal = 0, actual = 0;
+      for (const r of recs) {
+        ideal += r[STATE.view].ideal_cost;
+        actual += r[STATE.view].total_cost;
+      }
+      const gap = actual - ideal;
+      const gapPct = ideal ? gap/ideal : 0;
+      aoa.push([p, y, m, ideal, actual, gap, gapPct]);
+    }
+  }
+  
+  // Build workbook
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  const filename = `TB_FoodCost_${filenameSuffix}_${STATE.period}.xlsx`;
+  XLSX.writeFile(wb, filename);
+}
+
+// Re-render on resize
+window.addEventListener('resize', () => {
+  if (DATA) render();
+});
+</script>
+
+<!-- Service Worker (PWA) -->
+<script>
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('../service-worker.js').catch(() => {});
+  });
+}
+</script>
+
+</body>
+</html>

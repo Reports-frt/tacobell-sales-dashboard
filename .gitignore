@@ -1,0 +1,31 @@
+# Working directory (raw downloaded xlsx + logs)
+_work/
+*.log
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.Python
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# IDE
+.vs/
+.vscode/
+.idea/
+*.swp
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Credentials (just in case)
+*.env
+.env.*
+credentials.json
+github_pat.txt
