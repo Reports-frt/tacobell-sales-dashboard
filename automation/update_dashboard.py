@@ -630,6 +630,18 @@ def build_data_json(data, budget, hourly_data=None):
                                               DRIVETHRU, E-FOOD GO, WOLT, BOX)
                       DELIVERAS rows are merged into E-FOOD GO before aggregation.
     """
+
+    # ── PATCH: Amount/Sales column compatibility ──────────────────────
+    # parse_sales_analysis produces 'Sales'; legacy code uses 'Amount'.
+    # Ensure both column names exist as aliases so all downstream code works.
+    if 'Sales' in data.columns and 'Amount' not in data.columns:
+        data = data.copy()
+        data['Amount'] = data['Sales']
+    elif 'Amount' in data.columns and 'Sales' not in data.columns:
+        data = data.copy()
+        data['Sales'] = data['Amount']
+    # ──────────────────────────────────────────────────────────────────
+
     log.info("=" * 60)
     log.info("STEP 3b: Building data.json structure...")
 
@@ -905,11 +917,75 @@ def git_push_data_json(json_data):
     # carry it forward so the dashboard's Hourly tab doesn't disappear.
     preserve_previous_hourly(json_data, json_path)
 
-    # Write the new data.json
-    with open(json_path, 'w', encoding='utf-8') as f:
-        json.dump(json_data, f, separators=(',', ':'), ensure_ascii=False)
-    size_mb = os.path.getsize(json_path) / 1024 / 1024
-    log.info(f"  Wrote data.json ({size_mb:.2f} MB)")
+    # ===== Step A: Backup current data.json =====
+    backup_path = None
+    if os.path.exists(json_path):
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime('%Y%m%d-%H%M%S')
+        backup_path = os.path.join(repo, f'data.json.backup-{ts}')
+        try:
+            import shutil
+            shutil.copy(json_path, backup_path)
+            log.info(f"  ✓ Backed up to {os.path.basename(backup_path)}")
+        except Exception as e:
+            log.warning(f"  Backup failed: {e}")
+            backup_path = None
+
+    # ===== Step B: Merge with existing data.json (preserves historical) =====
+    json_data = merge_with_existing(json_data, json_path)
+
+    # ===== Step C: Pre-write validation =====
+    ok, issues = validate_data_json_structure(json_data)
+    if not ok:
+        log.error("  ❌ Pre-write validation FAILED:")
+        for issue in issues:
+            log.error(f"     - {issue}")
+        log.error("  ABORTING write to protect data.json from corruption.")
+        sys.exit(1)
+
+    # ===== Step D: Atomic write (write-temp, rename) =====
+    tmp_path = json_path + '.tmp'
+    try:
+        with open(tmp_path, 'w', encoding='utf-8') as f:
+            json.dump(json_data, f, separators=(',', ':'), ensure_ascii=False)
+        os.replace(tmp_path, json_path)
+        size_mb = os.path.getsize(json_path) / 1024 / 1024
+        log.info(f"  ✓ Wrote data.json ({size_mb:.2f} MB)")
+    except Exception as e:
+        log.error(f"  ❌ Write failed: {e}")
+        if os.path.exists(tmp_path):
+            try: os.remove(tmp_path)
+            except: pass
+        if backup_path and os.path.exists(backup_path):
+            log.info(f"  Restoring backup {os.path.basename(backup_path)}...")
+            import shutil
+            shutil.copy(backup_path, json_path)
+        sys.exit(1)
+
+    # ===== Step E: Post-write validation =====
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            re_read = json.load(f)
+        ok, issues = validate_data_json_structure(re_read)
+        if not ok:
+            log.error("  ❌ Post-write validation FAILED:")
+            for issue in issues:
+                log.error(f"     - {issue}")
+            if backup_path and os.path.exists(backup_path):
+                log.error(f"  Rolling back to {os.path.basename(backup_path)}...")
+                import shutil
+                shutil.copy(backup_path, json_path)
+            sys.exit(1)
+        log.info("  ✓ Post-write validation passed")
+    except Exception as e:
+        log.error(f"  Could not re-read data.json: {e}")
+        if backup_path and os.path.exists(backup_path):
+            import shutil
+            shutil.copy(backup_path, json_path)
+        sys.exit(1)
+    
+    # ===== Step F: Cleanup old backups (keep last 10) =====
+    cleanup_old_backups(repo, keep_n=10)
 
     git_exe = find_git_executable()
     log.info(f"  Using git: {git_exe}")
@@ -1065,6 +1141,232 @@ def verify_deployment(json_data):
 # ============================================================
 # MAIN
 # ============================================================
+
+def merge_with_existing(new_json, json_path):
+    """Merge newly-built JSON with existing data.json to preserve historical data.
+    
+    CRITICAL for bullet-proofing: pipeline used to overwrite data.json every run,
+    losing historical data. This function:
+      1. Reads existing data.json (if present)
+      2. Merges historical records that the new build doesn't include
+      3. Returns unified JSON with FULL history preserved
+    
+    Dedup key: (date, store_idx, sub_idx). New data wins on conflicts.
+    """
+    if not os.path.exists(json_path):
+        log.info("  No existing data.json — nothing to merge")
+        return new_json
+    
+    try:
+        with open(json_path, 'r', encoding='utf-8') as f:
+            existing = json.load(f)
+    except Exception as e:
+        log.warning(f"  Could not read existing data.json: {e}")
+        log.warning("  Proceeding with new data only (no merge)")
+        return new_json
+    
+    log.info("=" * 60)
+    log.info("STEP 3c: Merging with existing data.json (preserve historical)")
+    
+    existing_st = existing.get('records_st', [])
+    new_st = new_json.get('records_st', [])
+    
+    if not existing_st:
+        log.info("  Existing data.json has no records — no merge needed")
+        return new_json
+    
+    existing_dates = set(r[0] for r in existing_st)
+    new_dates = set(r[0] for r in new_st)
+    new_min = min(new_dates) if new_dates else None
+    new_max = max(new_dates) if new_dates else None
+    existing_min = min(existing_dates) if existing_dates else None
+    existing_max = max(existing_dates) if existing_dates else None
+    
+    log.info(f"  Existing data: {len(existing_st):,} records, {existing_min} → {existing_max}")
+    log.info(f"  New data:      {len(new_st):,} records, {new_min} → {new_max}")
+    
+    e_meta = existing.get('meta', {})
+    n_meta = new_json.get('meta', {})
+    e_stores = e_meta.get('stores', [])
+    n_stores = n_meta.get('stores', [])
+    
+    only_in_existing = [s for s in e_stores if s not in n_stores]
+    only_in_new = [s for s in n_stores if s not in e_stores]
+    
+    if only_in_existing:
+        log.warning(f"  Stores in existing not in new: {only_in_existing} (preserving)")
+    if only_in_new:
+        log.info(f"  New stores in new data: {only_in_new}")
+    
+    unified_stores = list(e_stores) + [s for s in n_stores if s not in e_stores]
+    e_si_to_unified = {i: unified_stores.index(s) for i, s in enumerate(e_stores)}
+    n_si_to_unified = {i: unified_stores.index(s) for i, s in enumerate(n_stores)}
+    
+    for key in ['salestypes', 'types', 'channels']:
+        e_v = e_meta.get(key, [])
+        n_v = n_meta.get(key, [])
+        if e_v and n_v and e_v != n_v:
+            log.error(f"  Schema mismatch on '{key}'!")
+            log.error(f"    Existing: {e_v}")
+            log.error(f"    New:      {n_v}")
+            log.error(f"  Aborting merge to avoid data corruption. Using new data only.")
+            return new_json
+    
+    for record_key in ['records_st', 'records_type', 'records_ch']:
+        e_records = existing.get(record_key, [])
+        n_records = new_json.get(record_key, [])
+        
+        remapped_existing = []
+        for r in e_records:
+            if len(r) < 5:
+                continue
+            d, si, sub, s, t = r
+            new_si = e_si_to_unified.get(si)
+            if new_si is None:
+                continue
+            remapped_existing.append([d, new_si, sub, s, t])
+        
+        remapped_new = []
+        for r in n_records:
+            if len(r) < 5:
+                continue
+            d, si, sub, s, t = r
+            new_si = n_si_to_unified.get(si)
+            if new_si is None:
+                continue
+            remapped_new.append([d, new_si, sub, s, t])
+        
+        new_keys = set((r[0], r[1], r[2]) for r in remapped_new)
+        kept_existing = [r for r in remapped_existing if (r[0], r[1], r[2]) not in new_keys]
+        
+        merged = kept_existing + remapped_new
+        merged.sort(key=lambda r: (r[0], r[1], r[2]))
+        
+        new_json[record_key] = merged
+        log.info(f"  {record_key}: +{len(remapped_new):,} new | preserved {len(kept_existing):,} historical | total {len(merged):,}")
+    
+    new_json['meta']['stores'] = unified_stores
+    
+    e_store_meta = e_meta.get('store_meta', {})
+    n_store_meta = new_json.get('meta', {}).get('store_meta', {})
+    for sname, smeta in e_store_meta.items():
+        if sname not in n_store_meta:
+            n_store_meta[sname] = smeta
+    new_json['meta']['store_meta'] = n_store_meta
+    
+    # Merge hourly
+    e_hourly = existing.get('hourly')
+    n_hourly = new_json.get('hourly')
+    
+    if e_hourly and isinstance(e_hourly, dict):
+        if not n_hourly or not isinstance(n_hourly, dict):
+            log.info("  New data has no hourly — preserving existing hourly")
+            new_json['hourly'] = e_hourly
+        else:
+            log.info("  Merging hourly data (year-level dedup)...")
+            for hkey in ['records_hsc', 'records_dow_hour']:
+                e_arr = e_hourly.get(hkey, [])
+                n_arr = n_hourly.get(hkey, [])
+                n_years = set(r[0] for r in n_arr if r)
+                preserved = [r for r in e_arr if r and r[0] not in n_years]
+                n_hourly[hkey] = preserved + n_arr
+                log.info(f"    {hkey}: +{len(n_arr):,} new | preserved {len(preserved):,} historical | total {len(n_hourly[hkey]):,}")
+            
+            e_dates = list(e_hourly.get('dates', []))
+            n_dates = list(n_hourly.get('dates', []))
+            unified_dates = sorted(set(e_dates) | set(n_dates))
+            date_to_unified_idx = {d: i for i, d in enumerate(unified_dates)}
+            
+            rebuilt_hsd = []
+            new_hsd_keys = set()
+            
+            for r in n_hourly.get('records_hsd', []):
+                if not r or len(r) < 4:
+                    continue
+                old_di, si, hr, sl = r[0], r[1], r[2], r[3]
+                if old_di >= len(n_dates):
+                    continue
+                d = n_dates[old_di]
+                new_di = date_to_unified_idx.get(d)
+                new_si = n_si_to_unified.get(si)
+                if new_di is None or new_si is None:
+                    continue
+                new_hsd_keys.add((new_di, new_si, hr))
+                rebuilt_hsd.append([new_di, new_si, hr, sl])
+            
+            for r in e_hourly.get('records_hsd', []):
+                if not r or len(r) < 4:
+                    continue
+                old_di, si, hr, sl = r[0], r[1], r[2], r[3]
+                if old_di >= len(e_dates):
+                    continue
+                d = e_dates[old_di]
+                new_di = date_to_unified_idx.get(d)
+                new_si = e_si_to_unified.get(si)
+                if new_di is None or new_si is None:
+                    continue
+                if (new_di, new_si, hr) in new_hsd_keys:
+                    continue
+                rebuilt_hsd.append([new_di, new_si, hr, sl])
+            
+            n_hourly['dates'] = unified_dates
+            n_hourly['records_hsd'] = rebuilt_hsd
+            n_hourly['years'] = sorted(set(n_hourly.get('years', [])) | set(e_hourly.get('years', [])))
+            n_hourly['hours'] = sorted(set(n_hourly.get('hours', [])) | set(e_hourly.get('hours', [])))
+            log.info(f"    records_hsd: total {len(rebuilt_hsd):,} across {len(unified_dates):,} dates")
+            log.info(f"    Final years: {n_hourly['years']}")
+            
+            new_json['hourly'] = n_hourly
+    
+    all_dates = [r[0] for r in new_json.get('records_st', [])]
+    if all_dates:
+        new_json['meta']['first_date'] = min(all_dates)
+        new_json['meta']['latest_date'] = max(all_dates)
+    
+    log.info(f"  ✓ Merge complete: {new_json['meta'].get('first_date')} → {new_json['meta'].get('latest_date')}")
+    return new_json
+
+
+def validate_data_json_structure(data):
+    """Sanity-check data.json before/after writing. Returns (ok, issues)."""
+    issues = []
+    for k in ['meta', 'records_st', 'records_ch']:
+        if k not in data:
+            issues.append(f"Missing top-level key: {k}")
+    if 'meta' in data:
+        meta = data['meta']
+        for k in ['stores', 'salestypes', 'channels']:
+            if k not in meta:
+                issues.append(f"Missing meta key: {k}")
+    for k in ['records_st', 'records_type', 'records_ch']:
+        if k in data:
+            records = data[k]
+            if not records:
+                continue
+            sample = records[0]
+            if len(sample) != 5:
+                issues.append(f"{k}: row length is {len(sample)}, expected 5. Sample: {sample}")
+            n_stores = len(data.get('meta', {}).get('stores', []))
+            if n_stores > 0:
+                max_si = max(r[1] for r in records if len(r) >= 2)
+                if max_si >= n_stores:
+                    issues.append(f"{k}: max store_idx {max_si} >= store count {n_stores}")
+    return len(issues) == 0, issues
+
+
+def cleanup_old_backups(repo_path, keep_n=10):
+    """Keep only the N most recent data.json.backup-* files in repo root."""
+    import glob
+    pattern = os.path.join(repo_path, 'data.json.backup-*')
+    backups = sorted(glob.glob(pattern), key=os.path.getmtime, reverse=True)
+    if len(backups) > keep_n:
+        for old in backups[keep_n:]:
+            try:
+                os.remove(old)
+                log.info(f"  Cleaned up old backup: {os.path.basename(old)}")
+            except Exception as e:
+                log.warning(f"  Failed to remove backup {old}: {e}")
+
 
 def main():
     started = datetime.now()
