@@ -1466,9 +1466,13 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
       </div>
     </div>
     <div class="pw-label">Εισάγετε κωδικό πρόσβασης</div>
-    <input id="pwInput" type="password" autocomplete="off" placeholder="••••••••" />
-    <div id="pwError" class="pw-error"></div>
-    <button id="pwSubmit">Είσοδος</button>
+    <form onsubmit="return false" autocomplete="on">
+      <!-- Hidden username: κάνει τον browser να σώζει ΞΕΧΩΡΙΣΤΟ credential ανά dashboard (KFC vs TB στο ίδιο domain) -->
+      <input type="text" name="username" value="tacobell-dashboard" autocomplete="username" readonly tabindex="-1" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0" />
+      <input id="pwInput" name="tb_dashboard_password" type="password" autocomplete="section-tacobell current-password" placeholder="••••••••" />
+      <div id="pwError" class="pw-error"></div>
+      <button id="pwSubmit" type="submit">Είσοδος</button>
+    </form>
     <div class="pw-footer">Taco Bell Greece · Internal Only</div>
   </div>
 </div>
@@ -4347,7 +4351,7 @@ function renderHourly(R) {
 
   const years = HOURLY.years.slice().sort();
   // Dead-hours filter (02:00-10:00 = ώρες ελέγχου / περιστασιακές)
-  const DEAD_HOURS = new Set([2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  const DEAD_HOURS = new Set([4, 5, 6, 7, 8, 9]);  // ανοιχτά έως 04:00 · η 10:00 πλέον ορατή (προετοιμασία/άνοιγμα)
   const allHours = HOURLY.hours.slice().sort((a,b) => a-b);
   const hours = allHours.filter(h => !DEAD_HOURS.has(h));
 
@@ -5230,18 +5234,20 @@ function renderForecast(R) {
   };
 
   html += `<div class="panel-section">
-    <div class="section-title"><span>Μηνιαία πρόβλεψη — ${year}</span><span class="meta">Projected vs Budget · μέχρι τέλος έτους</span></div>
+    <div class="section-title"><span>Μηνιαία πρόβλεψη — ${year}</span><span class="meta">Ιαν→Δεκ · περασμένοι μήνες = actual, μπροστά = projected</span></div>
     <table class="desktop-table"><thead><tr>
       <th>Μήνας</th><th>Proj Sales</th><th>Budget</th><th>Δ Sales</th>
       <th>Proj TCs</th><th>Bud TCs</th><th>Δ TCs</th>
       <th>Proj AVG</th><th>Bud AVG</th><th>Αργίες</th>
     </tr></thead><tbody>`;
-  for (let m = curMonth; m <= 12; m++) {
+  for (let m = 1; m <= 12; m++) {
     const p = monthProj(m), b = monthBudget(m);
+    if (m < curMonth && p.s <= 0) continue;  // παλιός μήνας χωρίς δεδομένα (πριν ανοίξουμε)
     const pAvg = p.t > 0 ? p.s / p.t : null, bAvg = b.t > 0 ? b.s / b.t : null;
     const isCur = m === curMonth;
-    html += `<tr ${isCur ? 'style="background: rgba(192,38,211,0.06)"' : ''}>
-      <td><strong>${FC_MONTH_GR[m]}</strong>${isCur ? ` <span style="font-size:9px;color:var(--text-2)">(${p.actualDays} actual + ${p.projDays} proj)</span>` : ''}${p.anyRun ? ' <span title="Περιλαμβάνει store σε run-rate basis (χωρίς LY)" style="font-size:9px">🆕</span>' : ''}</td>
+    const isPast = m < curMonth;
+    html += `<tr ${isCur ? 'style="background: rgba(192,38,211,0.06)"' : (isPast ? 'style="opacity:0.75"' : '')}>
+      <td><strong>${FC_MONTH_GR[m]}</strong>${isCur ? ` <span style="font-size:9px;color:var(--text-2)">(${p.actualDays} actual + ${p.projDays} proj)</span>` : ''}${isPast ? ' <span style="font-size:9px;color:var(--text-2)">(actual)</span>' : ''}${p.anyRun && !isPast ? ' <span title="Περιλαμβάνει store σε run-rate basis (χωρίς LY)" style="font-size:9px">🆕</span>' : ''}</td>
       <td><strong>${fmtK(p.s)}</strong></td>
       <td>${b.s > 0 ? fmtK(b.s) : '—'}</td>
       <td>${dPct(p.s, b.s)}</td>
@@ -5289,6 +5295,60 @@ function renderForecast(R) {
     </tr>`;
   }
   html += `</tbody></table></div>`;
+
+  // ============ SECTION 2β: STORE × WEEK matrix ============
+  {
+    const weekCols = [];
+    for (let w = 0; w < 6; w++) {
+      const wStart = _fcAddDays(curMon, w * 7);
+      const dd = new Date(wStart + 'T12:00:00');
+      weekCols.push({ wStart, label: `${dd.getDate()}/${dd.getMonth() + 1}` });
+    }
+    const rows = [];
+    for (let si = 0; si < STORES.length; si++) {
+      if (sf && !sf.has(si)) continue;
+      const cells = weekCols.map(wc => {
+        let ps = 0, bs = 0, anyData = false;
+        for (let d = 0; d < 7; d++) {
+          const ds = _fcAddDays(wc.wStart, d);
+          if (ds <= LATEST) {
+            const a = dailyStore.get(ds);
+            if (a && a[si].sales > 0) { ps += a[si].sales; anyData = true; }
+          } else {
+            const p = fcDayProj(si, ds);
+            if (p.s > 0) { ps += p.s; anyData = true; }
+          }
+          const db = getDayBudget(ds, si, '364');
+          bs += db.sales;
+        }
+        return { ps, bs, anyData };
+      });
+      const tot = cells.reduce((a, cl) => a + cl.ps, 0);
+      if (tot > 0) rows.push({ si, short: STORE_META[STORES[si]]?.short || STORES[si], cells, tot });
+    }
+    rows.sort((a, b) => b.tot - a.tot);
+    const wkCell = (cl) => {
+      if (!cl.anyData) return '<td style="color:var(--text-2)">—</td>';
+      let style = '';
+      let dTag = '';
+      if (cl.bs > 0) {
+        const d = cl.ps / cl.bs - 1;
+        const col = d >= 0 ? 'rgba(34,197,94,0.14)' : (d < -0.05 ? 'rgba(239,68,68,0.16)' : 'rgba(245,158,11,0.12)');
+        style = `background:${col}`;
+        dTag = `<div style="font-size:8px;color:var(--text-2)">${d >= 0 ? '+' : ''}${(d * 100).toFixed(0)}% vs B</div>`;
+      }
+      return `<td style="${style}"><strong>${fmtK(cl.ps)}</strong>${dTag}</td>`;
+    };
+    html += `<div class="panel-section">
+      <div class="section-title"><span>Ανά μαγαζί × Εβδομάδα</span><span class="meta">projected sales (τρέχουσα + 5) · χρώμα = vs budget εβδομάδας</span></div>
+      <div style="overflow-x:auto"><table class="desktop-table" style="font-size:10px"><thead><tr>
+        <th style="text-align:left">Store</th>${weekCols.map((wc, i) => `<th>Εβδ ${wc.label}${i === 0 ? ' <span style="font-size:8px">(τρέχ.)</span>' : ''}</th>`).join('')}<th>Σύνολο 6εβδ</th>
+      </tr></thead><tbody>
+      ${rows.map(r => `<tr><td style="text-align:left"><strong>${r.short}</strong></td>${r.cells.map(wkCell).join('')}<td><strong>${fmtK(r.tot)}</strong></td></tr>`).join('')}
+      </tbody></table></div>
+      <div style="font-size:10px;color:var(--text-2);font-family:var(--mono);padding-top:6px">Τρέχουσα εβδομάδα = actual μέχρι ${LATEST} + projected μετά. Πράσινο ≥ budget · κίτρινο έως -5% · κόκκινο κάτω από -5%.</div>
+    </div>`;
+  }
 
   // ============ SECTION 3: HOURLY forecast for a chosen day ============
   const fcDay = STATE.fcDay || _fcAddDays(LATEST, 1);
@@ -5352,6 +5412,47 @@ function renderForecast(R) {
       }).join('')}
     </tbody></table>` : `<p style="color:var(--text-2);font-size:12px">Δεν υπάρχει αρκετό ωριαίο ιστορικό για αυτό το store/ημέρα (χρειάζονται per-date hourly δεδομένα).</p>`}
   </div>`;
+
+  // ============ SECTION 3β: STORE × HOUR matrix (όταν "Όλη η αλυσίδα") ============
+  if (STATE.fcStore === 'ALL' || STATE.fcStore == null) {
+    const shRows = [];
+    const hourSet = new Set();
+    for (let si = 0; si < STORES.length; si++) {
+      if (sf && !sf.has(si)) continue;
+      const p = fcDayProj(si, fcDay);
+      if (p.s <= 0) continue;
+      const shares = fcHourShares(si, dow);
+      if (!shares) continue;
+      const perHour = {};
+      Object.entries(shares).forEach(([h, sh]) => {
+        const v = p.s * sh;
+        if (v > 3) { perHour[h] = v; hourSet.add(parseInt(h)); }
+      });
+      shRows.push({ short: STORE_META[STORES[si]]?.short || STORES[si], perHour, tot: p.s });
+    }
+    if (shRows.length > 1) {
+      shRows.sort((a, b) => b.tot - a.tot);
+      const shHours = [...hourSet].sort((a, b) => {
+        const oa = a < 6 ? a + 24 : a, ob = b < 6 ? b + 24 : b;
+        return oa - ob;
+      });
+      const cellFor = (r, h) => {
+        const v = r.perHour[String(h)] || r.perHour[h] || 0;
+        if (v <= 0) return '<td style="color:var(--text-2)">·</td>';
+        const rowMax = Math.max(...Object.values(r.perHour));
+        const alpha = Math.min(0.55, 0.08 + 0.5 * (v / rowMax));
+        return `<td style="background: rgba(192,38,211,${alpha.toFixed(2)})" title="${r.short} ${h}:00 — ${Math.round(v)}€">${Math.round(v)}</td>`;
+      };
+      html += `<div class="panel-section">
+        <div class="section-title"><span>Ανά μαγαζί × Ώρα</span><span class="meta">${fcDay} · projected € ανά ώρα (ένταση = ώρα αιχμής του store)</span></div>
+        <div style="overflow-x:auto"><table class="desktop-table" style="font-size:10px"><thead><tr>
+          <th style="text-align:left">Store</th>${shHours.map(h => `<th>${h}</th>`).join('')}<th>Σύνολο</th>
+        </tr></thead><tbody>
+        ${shRows.map(r => `<tr><td style="text-align:left"><strong>${r.short}</strong></td>${shHours.map(h => cellFor(r, h)).join('')}<td><strong>${fmtK(r.tot)}</strong></td></tr>`).join('')}
+        </tbody></table></div>
+      </div>`;
+    }
+  }
 
   root.innerHTML = html;
 }
@@ -5823,7 +5924,7 @@ function _trendChartBlocks(R) {
 function _hourlyExportBlocks(R) {
   const blocks = [];
   if (!HOURLY || !HOURLY.hours) return blocks;
-  const hours = HOURLY.hours.filter(h => { const hi = parseInt(h); return hi < 2 || hi >= 10; });
+  const hours = HOURLY.hours.filter(h => { const hi = parseInt(h); return hi < 4 || hi >= 10; });
   const years = (HOURLY.years || []).slice().sort();
   const cyYear = years.length ? years[years.length-1] : null;
   const lyYear = years.length >= 2 ? years[years.length-2] : null;
@@ -8361,7 +8462,7 @@ function exportFullPPTX() {
     // ---------- SLIDE: Hourly Profile (native chart) ----------
     try {
       if (HOURLY && HOURLY.hours && hourlyByYearStoreHour) {
-        const hours = HOURLY.hours.filter(h => { const hi=parseInt(h); return hi<2 || hi>=10; });
+        const hours = HOURLY.hours.filter(h => { const hi=parseInt(h); return hi<4 || hi>=10; });
         const years = (HOURLY.years||[]).slice().sort();
         const cyYear = years.length ? years[years.length-1] : null;
         const lyYear = years.length>=2 ? years[years.length-2] : null;
