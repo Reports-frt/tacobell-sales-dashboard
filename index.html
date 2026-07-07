@@ -2657,6 +2657,7 @@ const STATE = {
   hourlyChannels: [],     // hourly tab channel multi-select (empty = όλα); keys: group keys ή channel names
   trendMetric: "sales",   // Daily Trend metric: sales | tcs | avg
   fcMonth: null,          // Forecast tab: selected month for per-store table (null = next month auto)
+  fcMetric: "sales",      // Forecast tab: sales | tcs
   fcDay: null,            // Forecast tab: selected day for hourly view (null = tomorrow auto)
   fcStore: 'ALL',         // Forecast tab hourly: 'ALL' or store index
   storeType: "all",       // all | "In Line" | "Mall Food Court" | etc
@@ -5176,6 +5177,7 @@ const FC_MONTH_GR = ['', 'Ιανουάριος', 'Φεβρουάριος', 'Μά
 const FC_DOW_GR = ['Κυρ', 'Δευ', 'Τρι', 'Τετ', 'Πεμ', 'Παρ', 'Σαβ'];
 
 window.setFcMonth = function(m) { STATE.fcMonth = m; renderActive(); };
+window.setFcMetric = function(m) { STATE.fcMetric = m; renderActive(); };
 window.setFcDay = function(d) { STATE.fcDay = d; renderActive(); };
 window.setFcStore = function(v) { STATE.fcStore = v; renderActive(); };
 
@@ -5233,6 +5235,60 @@ function renderForecast(R) {
     return `<span title="Διαφορά αργιών vs πέρσι — επηρεάζει το projection" style="cursor:help">🎉 ${parts.join(' · ')}</span>`;
   };
 
+  // ===== Metric toggle (sales | tcs) — affects charts + matrices =====
+  const fcMet = STATE.fcMetric || 'sales';
+  const fcVal = (obj) => fcMet === 'tcs' ? obj.t : obj.s;
+  const fcFmt = (v) => fcMet === 'tcs' ? fmtNum(v) : fmtK(v);
+  html += `<div class="trend-metric-bar">
+    <span class="tm-label">ΜΕΤΡΙΚΗ</span>
+    <button class="trend-metric-chip ${fcMet === 'sales' ? 'active' : ''}" onclick="window.setFcMetric('sales')">Πωλήσεις (€)</button>
+    <button class="trend-metric-chip ${fcMet === 'tcs' ? 'active' : ''}" onclick="window.setFcMetric('tcs')">Συναλλαγές (TCs)</button>
+  </div>`;
+
+  // ===== SVG chart helper (line, multi-series, null-safe) =====
+  function fcChartSVG(labels, seriesArr, fmt) {
+    const W = 700, H = 240, PAD = {l: 55, r: 15, t: 18, b: 28};
+    const iW = W - PAD.l - PAD.r, iH = H - PAD.t - PAD.b;
+    const vals = [];
+    seriesArr.forEach(sr => sr.values.forEach(v => { if (v != null && isFinite(v) && v > 0) vals.push(v); }));
+    if (!vals.length) return '';
+    const minV = Math.min(...vals), maxV = Math.max(...vals);
+    const range = (maxV - minV) || 1;
+    const yMin = Math.max(0, minV - range * 0.12), yMax = maxV + range * 0.12;
+    const xs = i => PAD.l + i / Math.max(1, labels.length - 1) * iW;
+    const ys = v => PAD.t + iH - (v - yMin) / (yMax - yMin) * iH;
+    let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">`;
+    for (let g = 0; g <= 4; g++) {
+      const y = PAD.t + iH * g / 4, v = yMax - (yMax - yMin) * g / 4;
+      svg += `<line x1="${PAD.l}" y1="${y}" x2="${W - PAD.r}" y2="${y}" stroke="var(--border-soft)" stroke-width="1"/>`;
+      svg += `<text x="${PAD.l - 6}" y="${y + 4}" text-anchor="end" fill="var(--text-2)" font-size="9" font-family="var(--mono)">${fmt(v)}</text>`;
+    }
+    const step = Math.max(1, Math.ceil(labels.length / 12));
+    labels.forEach((lb, i) => {
+      if (i % step === 0 || i === labels.length - 1)
+        svg += `<text x="${xs(i)}" y="${H - 8}" text-anchor="middle" fill="var(--text-2)" font-size="9" font-family="var(--mono)">${lb}</text>`;
+    });
+    seriesArr.forEach(sr => {
+      let d = '', penUp = true;
+      sr.values.forEach((v, i) => {
+        if (v == null || !isFinite(v) || v <= 0) { penUp = true; return; }
+        d += `${penUp ? 'M' : 'L'}${xs(i)},${ys(v)} `;
+        penUp = false;
+      });
+      svg += `<path fill="none" stroke="${sr.color}" stroke-width="${sr.width || 2}" stroke-dasharray="${sr.dash || ''}" d="${d.trim()}"/>`;
+      sr.values.forEach((v, i) => {
+        if (v == null || !isFinite(v) || v <= 0) return;
+        svg += `<g><circle cx="${xs(i)}" cy="${ys(v)}" r="2.5" fill="${sr.color}"/><title>${sr.name} ${labels[i]}: ${fmt(v)}</title></g>`;
+      });
+    });
+    let lx = PAD.l + 8;
+    seriesArr.forEach(sr => {
+      svg += `<rect x="${lx}" y="${PAD.t + 2}" width="14" height="3" fill="${sr.color}"/><text x="${lx + 18}" y="${PAD.t + 7}" fill="var(--text-1)" font-size="10">${sr.name}</text>`;
+      lx += 22 + sr.name.length * 6.5 + 14;
+    });
+    return svg + '</svg>';
+  }
+
   html += `<div class="panel-section">
     <div class="section-title"><span>Μηνιαία πρόβλεψη — ${year}</span><span class="meta">Ιαν→Δεκ · περασμένοι μήνες = actual, μπροστά = projected</span></div>
     <table class="desktop-table"><thead><tr>
@@ -5246,7 +5302,7 @@ function renderForecast(R) {
     const pAvg = p.t > 0 ? p.s / p.t : null, bAvg = b.t > 0 ? b.s / b.t : null;
     const isCur = m === curMonth;
     const isPast = m < curMonth;
-    html += `<tr ${isCur ? 'style="background: rgba(192,38,211,0.06)"' : (isPast ? 'style="opacity:0.75"' : '')}>
+    html += `<tr ${isCur ? 'style="background: rgba(112,32,130,0.06)"' : (isPast ? 'style="opacity:0.75"' : '')}>
       <td><strong>${FC_MONTH_GR[m]}</strong>${isCur ? ` <span style="font-size:9px;color:var(--text-2)">(${p.actualDays} actual + ${p.projDays} proj)</span>` : ''}${isPast ? ' <span style="font-size:9px;color:var(--text-2)">(actual)</span>' : ''}${p.anyRun && !isPast ? ' <span title="Περιλαμβάνει store σε run-rate basis (χωρίς LY)" style="font-size:9px">🆕</span>' : ''}</td>
       <td><strong>${fmtK(p.s)}</strong></td>
       <td>${b.s > 0 ? fmtK(b.s) : '—'}</td>
@@ -5260,6 +5316,38 @@ function renderForecast(R) {
     </tr>`;
   }
   html += `</tbody></table></div>`;
+
+  // ============ CHART 1: Monthly Proj vs Budget vs LY ============
+  {
+    const mLabels = [], mProj = [], mBud = [], mLY = [];
+    for (let m = 1; m <= 12; m++) {
+      const p = monthProj(m), b = monthBudget(m);
+      mLabels.push(FC_MONTH_GR[m].slice(0, 3));
+      mProj.push(fcVal(p) > 0 ? fcVal(p) : null);
+      mBud.push(fcVal(b) > 0 ? fcVal(b) : null);
+      // LY: actual same calendar month last year
+      let lyS = 0, lyT = 0;
+      const dIM = new Date(year - 1, m, 0).getDate();
+      for (let d = 1; d <= dIM; d++) {
+        const ds = `${year - 1}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        const a = dailyStore.get(ds);
+        if (a) for (let si = 0; si < STORES.length; si++) {
+          if (sf && !sf.has(si)) continue;
+          lyS += a[si].sales; lyT += a[si].tcs;
+        }
+      }
+      const lyV = fcMet === 'tcs' ? lyT : lyS;
+      mLY.push(lyV > 0 ? lyV : null);
+    }
+    const chart = fcChartSVG(mLabels, [
+      { name: 'Projected', values: mProj, color: '#ef4444', width: 2.4 },
+      { name: 'Budget', values: mBud, color: '#22c55e', width: 1.8, dash: '3 3' },
+      { name: 'LY', values: mLY, color: '#f59e0b', width: 1.8, dash: '5 3' },
+    ], fcFmt);
+    if (chart) html += `<div class="panel-section">
+      <div class="section-title"><span>Μηνιαίο διάγραμμα — ${fcMet === 'tcs' ? 'Συναλλαγές' : 'Πωλήσεις'}</span><span class="meta">Projected vs Budget vs LY (${year - 1})</span></div>
+      <div class="chart-wrap">${chart}</div></div>`;
+  }
 
   // ============ SECTION 2: WEEKLY (current + next 5) ============
   // find Monday of current week
@@ -5283,7 +5371,7 @@ function renderForecast(R) {
       const hn = holidayName(ds); if (hn) hols.push(hn);
     }
     const [sy, sm, sd] = wStart.split('-'), [ey, em, ed] = wEnd.split('-');
-    html += `<tr ${w === 0 ? 'style="background: rgba(192,38,211,0.06)"' : ''}>
+    html += `<tr ${w === 0 ? 'style="background: rgba(112,32,130,0.06)"' : ''}>
       <td><strong>${+sd}/${+sm} – ${+ed}/${+em}</strong>${w === 0 ? ' <span style="font-size:9px;color:var(--text-2)">(τρέχουσα)</span>' : ''}</td>
       <td><strong>${fmtK(ps)}</strong></td>
       <td>${bs > 0 ? fmtK(bs) : '—'}</td>
@@ -5295,6 +5383,33 @@ function renderForecast(R) {
     </tr>`;
   }
   html += `</tbody></table></div>`;
+
+  // ============ CHART 2: Weekly Proj vs Budget ============
+  {
+    const wLabels = [], wProj = [], wBud = [];
+    for (let w = 0; w < 6; w++) {
+      const wStart = _fcAddDays(curMon, w * 7);
+      const dd = new Date(wStart + 'T12:00:00');
+      wLabels.push(`${dd.getDate()}/${dd.getMonth() + 1}`);
+      let ps = 0, pt = 0, bs = 0, bt = 0;
+      for (let d = 0; d < 7; d++) {
+        const ds = _fcAddDays(wStart, d);
+        const agg = fcDayAgg(ds, sf);
+        ps += agg.s; pt += agg.t;
+        const b = fcDayBudget(ds, sf);
+        bs += b.s; bt += b.t;
+      }
+      wProj.push(fcMet === 'tcs' ? pt : ps);
+      wBud.push((fcMet === 'tcs' ? bt : bs) || null);
+    }
+    const chart = fcChartSVG(wLabels, [
+      { name: 'Projected', values: wProj, color: '#ef4444', width: 2.4 },
+      { name: 'Budget', values: wBud, color: '#22c55e', width: 1.8, dash: '3 3' },
+    ], fcFmt);
+    if (chart) html += `<div class="panel-section">
+      <div class="section-title"><span>Εβδομαδιαίο διάγραμμα — ${fcMet === 'tcs' ? 'Συναλλαγές' : 'Πωλήσεις'}</span><span class="meta">τρέχουσα + 5 εβδομάδες (Δευτέρα-start)</span></div>
+      <div class="chart-wrap">${chart}</div></div>`;
+  }
 
   // ============ SECTION 2β: STORE × WEEK matrix ============
   {
@@ -5313,13 +5428,13 @@ function renderForecast(R) {
           const ds = _fcAddDays(wc.wStart, d);
           if (ds <= LATEST) {
             const a = dailyStore.get(ds);
-            if (a && a[si].sales > 0) { ps += a[si].sales; anyData = true; }
+            if (a && a[si].sales > 0) { ps += (fcMet === 'tcs' ? a[si].tcs : a[si].sales); anyData = true; }
           } else {
             const p = fcDayProj(si, ds);
-            if (p.s > 0) { ps += p.s; anyData = true; }
+            if (p.s > 0) { ps += fcVal(p); anyData = true; }
           }
           const db = getDayBudget(ds, si, '364');
-          bs += db.sales;
+          bs += (fcMet === 'tcs' ? (db.tcs || 0) : db.sales);
         }
         return { ps, bs, anyData };
       });
@@ -5337,14 +5452,14 @@ function renderForecast(R) {
         style = `background:${col}`;
         dTag = `<div style="font-size:8px;color:var(--text-2)">${d >= 0 ? '+' : ''}${(d * 100).toFixed(0)}% vs B</div>`;
       }
-      return `<td style="${style}"><strong>${fmtK(cl.ps)}</strong>${dTag}</td>`;
+      return `<td style="${style}"><strong>${fcFmt(cl.ps)}</strong>${dTag}</td>`;
     };
     html += `<div class="panel-section">
-      <div class="section-title"><span>Ανά μαγαζί × Εβδομάδα</span><span class="meta">projected sales (τρέχουσα + 5) · χρώμα = vs budget εβδομάδας</span></div>
+      <div class="section-title"><span>Ανά μαγαζί × Εβδομάδα</span><span class="meta">projected ${fcMet === 'tcs' ? 'TCs' : 'sales'} (τρέχουσα + 5) · χρώμα = vs budget εβδομάδας</span></div>
       <div style="overflow-x:auto"><table class="desktop-table" style="font-size:10px"><thead><tr>
         <th style="text-align:left">Store</th>${weekCols.map((wc, i) => `<th>Εβδ ${wc.label}${i === 0 ? ' <span style="font-size:8px">(τρέχ.)</span>' : ''}</th>`).join('')}<th>Σύνολο 6εβδ</th>
       </tr></thead><tbody>
-      ${rows.map(r => `<tr><td style="text-align:left"><strong>${r.short}</strong></td>${r.cells.map(wkCell).join('')}<td><strong>${fmtK(r.tot)}</strong></td></tr>`).join('')}
+      ${rows.map(r => `<tr><td style="text-align:left"><strong>${r.short}</strong></td>${r.cells.map(wkCell).join('')}<td><strong>${fcFmt(r.tot)}</strong></td></tr>`).join('')}
       </tbody></table></div>
       <div style="font-size:10px;color:var(--text-2);font-family:var(--mono);padding-top:6px">Τρέχουσα εβδομάδα = actual μέχρι ${LATEST} + projected μετά. Πράσινο ≥ budget · κίτρινο έως -5% · κόκκινο κάτω από -5%.</div>
     </div>`;
@@ -5423,12 +5538,13 @@ function renderForecast(R) {
       if (p.s <= 0) continue;
       const shares = fcHourShares(si, dow);
       if (!shares) continue;
+      const baseV = fcVal(p);
       const perHour = {};
       Object.entries(shares).forEach(([h, sh]) => {
-        const v = p.s * sh;
-        if (v > 3) { perHour[h] = v; hourSet.add(parseInt(h)); }
+        const v = baseV * sh;
+        if (v > (fcMet === 'tcs' ? 0.4 : 3)) { perHour[h] = v; hourSet.add(parseInt(h)); }
       });
-      shRows.push({ short: STORE_META[STORES[si]]?.short || STORES[si], perHour, tot: p.s });
+      shRows.push({ short: STORE_META[STORES[si]]?.short || STORES[si], perHour, tot: baseV });
     }
     if (shRows.length > 1) {
       shRows.sort((a, b) => b.tot - a.tot);
@@ -5441,14 +5557,14 @@ function renderForecast(R) {
         if (v <= 0) return '<td style="color:var(--text-2)">·</td>';
         const rowMax = Math.max(...Object.values(r.perHour));
         const alpha = Math.min(0.55, 0.08 + 0.5 * (v / rowMax));
-        return `<td style="background: rgba(192,38,211,${alpha.toFixed(2)})" title="${r.short} ${h}:00 — ${Math.round(v)}€">${Math.round(v)}</td>`;
+        return `<td style="background: rgba(112,32,130,${alpha.toFixed(2)})" title="${r.short} ${h}:00 — ${Math.round(v)}${fcMet === 'tcs' ? ' TCs' : '€'}">${Math.round(v)}</td>`;
       };
       html += `<div class="panel-section">
-        <div class="section-title"><span>Ανά μαγαζί × Ώρα</span><span class="meta">${fcDay} · projected € ανά ώρα (ένταση = ώρα αιχμής του store)</span></div>
+        <div class="section-title"><span>Ανά μαγαζί × Ώρα</span><span class="meta">${fcDay} · projected ${fcMet === 'tcs' ? 'TCs' : '€'} ανά ώρα (ένταση = ώρα αιχμής του store)</span></div>
         <div style="overflow-x:auto"><table class="desktop-table" style="font-size:10px"><thead><tr>
           <th style="text-align:left">Store</th>${shHours.map(h => `<th>${h}</th>`).join('')}<th>Σύνολο</th>
         </tr></thead><tbody>
-        ${shRows.map(r => `<tr><td style="text-align:left"><strong>${r.short}</strong></td>${shHours.map(h => cellFor(r, h)).join('')}<td><strong>${fmtK(r.tot)}</strong></td></tr>`).join('')}
+        ${shRows.map(r => `<tr><td style="text-align:left"><strong>${r.short}</strong></td>${shHours.map(h => cellFor(r, h)).join('')}<td><strong>${fcFmt(r.tot)}</strong></td></tr>`).join('')}
         </tbody></table></div>
       </div>`;
     }
