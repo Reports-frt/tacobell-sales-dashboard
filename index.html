@@ -5289,17 +5289,34 @@ function renderForecast(R) {
     return svg + '</svg>';
   }
 
+  // LY monthly actuals (calendar month, last year) — used by table + chart
+  const _lyMonthCache = {};
+  function lyMonth(m) {
+    if (_lyMonthCache[m]) return _lyMonthCache[m];
+    let s = 0, t = 0;
+    const dIM = new Date(year - 1, m, 0).getDate();
+    for (let d = 1; d <= dIM; d++) {
+      const ds = `${year - 1}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const a = dailyStore.get(ds);
+      if (a) for (let si = 0; si < STORES.length; si++) {
+        if (sf && !sf.has(si)) continue;
+        s += a[si].sales; t += a[si].tcs;
+      }
+    }
+    return _lyMonthCache[m] = { s, t };
+  }
+
   html += `<div class="panel-section">
     <div class="section-title"><span>Μηνιαία πρόβλεψη — ${year}</span><span class="meta">Ιαν→Δεκ · περασμένοι μήνες = actual, μπροστά = projected</span></div>
     <table class="desktop-table"><thead><tr>
-      <th>Μήνας</th><th>Proj Sales</th><th>Budget</th><th>Δ Sales</th>
-      <th>Proj TCs</th><th>Bud TCs</th><th>Δ TCs</th>
-      <th>Proj AVG</th><th>Bud AVG</th><th>Αργίες</th>
+      <th>Μήνας</th><th>Proj Sales</th><th>Budget</th><th>Δ vs B</th><th>LY Sales</th><th>Δ vs LY</th>
+      <th>Proj TCs</th><th>Bud TCs</th><th>Δ vs B</th><th>LY TCs</th><th>Δ vs LY</th>
+      <th>Proj AVG</th><th>Bud AVG</th><th>LY AVG</th><th>Αργίες</th>
     </tr></thead><tbody>`;
   for (let m = 1; m <= 12; m++) {
-    const p = monthProj(m), b = monthBudget(m);
+    const p = monthProj(m), b = monthBudget(m), ly = lyMonth(m);
     if (m < curMonth && p.s <= 0) continue;  // παλιός μήνας χωρίς δεδομένα (πριν ανοίξουμε)
-    const pAvg = p.t > 0 ? p.s / p.t : null, bAvg = b.t > 0 ? b.s / b.t : null;
+    const pAvg = p.t > 0 ? p.s / p.t : null, bAvg = b.t > 0 ? b.s / b.t : null, lyAvg = ly.t > 0 ? ly.s / ly.t : null;
     const isCur = m === curMonth;
     const isPast = m < curMonth;
     html += `<tr ${isCur ? 'style="background: rgba(112,32,130,0.06)"' : (isPast ? 'style="opacity:0.75"' : '')}>
@@ -5307,11 +5324,16 @@ function renderForecast(R) {
       <td><strong>${fmtK(p.s)}</strong></td>
       <td>${b.s > 0 ? fmtK(b.s) : '—'}</td>
       <td>${dPct(p.s, b.s)}</td>
+      <td>${ly.s > 0 ? fmtK(ly.s) : '—'}</td>
+      <td>${dPct(p.s, ly.s)}</td>
       <td>${fmtNum(p.t)}</td>
       <td>${b.t > 0 ? fmtNum(b.t) : '—'}</td>
       <td>${dPct(p.t, b.t)}</td>
+      <td>${ly.t > 0 ? fmtNum(ly.t) : '—'}</td>
+      <td>${dPct(p.t, ly.t)}</td>
       <td>${pAvg != null ? fmtAvg(pAvg) : '—'}</td>
       <td>${bAvg != null ? fmtAvg(bAvg) : '—'}</td>
+      <td>${lyAvg != null ? fmtAvg(lyAvg) : '—'}</td>
       <td style="font-size:9px">${holidayNote(m)}</td>
     </tr>`;
   }
@@ -5325,18 +5347,8 @@ function renderForecast(R) {
       mLabels.push(FC_MONTH_GR[m].slice(0, 3));
       mProj.push(fcVal(p) > 0 ? fcVal(p) : null);
       mBud.push(fcVal(b) > 0 ? fcVal(b) : null);
-      // LY: actual same calendar month last year
-      let lyS = 0, lyT = 0;
-      const dIM = new Date(year - 1, m, 0).getDate();
-      for (let d = 1; d <= dIM; d++) {
-        const ds = `${year - 1}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-        const a = dailyStore.get(ds);
-        if (a) for (let si = 0; si < STORES.length; si++) {
-          if (sf && !sf.has(si)) continue;
-          lyS += a[si].sales; lyT += a[si].tcs;
-        }
-      }
-      const lyV = fcMet === 'tcs' ? lyT : lyS;
+      const lyM = lyMonth(m);
+      const lyV = fcMet === 'tcs' ? lyM.t : lyM.s;
       mLY.push(lyV > 0 ? lyV : null);
     }
     const chart = fcChartSVG(mLabels, [
@@ -5357,17 +5369,23 @@ function renderForecast(R) {
   html += `<div class="panel-section">
     <div class="section-title"><span>Εβδομαδιαία πρόβλεψη</span><span class="meta">τρέχουσα + 5 επόμενες</span></div>
     <table class="desktop-table"><thead><tr>
-      <th>Εβδομάδα</th><th>Proj Sales</th><th>Budget</th><th>Δ Sales</th>
-      <th>Proj TCs</th><th>Δ TCs</th><th>Proj AVG</th><th></th>
+      <th>Εβδομάδα</th><th>Proj Sales</th><th>Budget</th><th>Δ vs B</th><th>LY Sales</th><th>Δ vs LY</th>
+      <th>Proj TCs</th><th>Δ vs B</th><th>LY TCs</th><th>Δ vs LY</th><th>Proj AVG</th><th>LY AVG</th><th></th>
     </tr></thead><tbody>`;
   for (let w = 0; w < 6; w++) {
     const wStart = _fcAddDays(curMon, w * 7);
     const wEnd = _fcAddDays(wStart, 6);
-    let ps = 0, pt = 0, bs = 0, bt = 0, anyRun = false, hols = [];
+    let ps = 0, pt = 0, bs = 0, bt = 0, lys = 0, lyt = 0, anyRun = false, hols = [];
     for (let d = 0; d < 7; d++) {
       const ds = _fcAddDays(wStart, d);
       const r = fcDayAgg(ds, sf); ps += r.s; pt += r.t; if (r.anyRun) anyRun = true;
       const b = fcDayBudget(ds, sf); bs += b.s; bt += b.t;
+      // LY: same day-of-week last year (364-shift)
+      const la = dailyStore.get(lyDate(ds, '364'));
+      if (la) for (let si = 0; si < STORES.length; si++) {
+        if (sf && !sf.has(si)) continue;
+        lys += la[si].sales; lyt += la[si].tcs;
+      }
       const hn = holidayName(ds); if (hn) hols.push(hn);
     }
     const [sy, sm, sd] = wStart.split('-'), [ey, em, ed] = wEnd.split('-');
@@ -5376,9 +5394,14 @@ function renderForecast(R) {
       <td><strong>${fmtK(ps)}</strong></td>
       <td>${bs > 0 ? fmtK(bs) : '—'}</td>
       <td>${dPct(ps, bs)}</td>
+      <td>${lys > 0 ? fmtK(lys) : '—'}</td>
+      <td>${dPct(ps, lys)}</td>
       <td>${fmtNum(pt)}</td>
       <td>${dPct(pt, bt)}</td>
+      <td>${lyt > 0 ? fmtNum(lyt) : '—'}</td>
+      <td>${dPct(pt, lyt)}</td>
       <td>${pt > 0 ? fmtAvg(ps / pt) : '—'}</td>
+      <td>${lyt > 0 ? fmtAvg(lys / lyt) : '—'}</td>
       <td style="font-size:9px">${hols.length ? '🎉 ' + hols.join(', ') : ''}${anyRun ? ' 🆕' : ''}</td>
     </tr>`;
   }
@@ -5423,7 +5446,7 @@ function renderForecast(R) {
     for (let si = 0; si < STORES.length; si++) {
       if (sf && !sf.has(si)) continue;
       const cells = weekCols.map(wc => {
-        let ps = 0, bs = 0, anyData = false;
+        let ps = 0, bs = 0, lys = 0, anyData = false;
         for (let d = 0; d < 7; d++) {
           const ds = _fcAddDays(wc.wStart, d);
           if (ds <= LATEST) {
@@ -5435,8 +5458,10 @@ function renderForecast(R) {
           }
           const db = getDayBudget(ds, si, '364');
           bs += (fcMet === 'tcs' ? (db.tcs || 0) : db.sales);
+          const la = dailyStore.get(lyDate(ds, '364'));
+          if (la) lys += (fcMet === 'tcs' ? la[si].tcs : la[si].sales);
         }
-        return { ps, bs, anyData };
+        return { ps, bs, lys, anyData };
       });
       const tot = cells.reduce((a, cl) => a + cl.ps, 0);
       if (tot > 0) rows.push({ si, short: STORE_META[STORES[si]]?.short || STORES[si], cells, tot });
@@ -5451,6 +5476,10 @@ function renderForecast(R) {
         const col = d >= 0 ? 'rgba(34,197,94,0.14)' : (d < -0.05 ? 'rgba(239,68,68,0.16)' : 'rgba(245,158,11,0.12)');
         style = `background:${col}`;
         dTag = `<div style="font-size:8px;color:var(--text-2)">${d >= 0 ? '+' : ''}${(d * 100).toFixed(0)}% vs B</div>`;
+      }
+      if (cl.lys > 0) {
+        const dl = cl.ps / cl.lys - 1;
+        dTag += `<div style="font-size:8px;color:var(--text-2)">${dl >= 0 ? '+' : ''}${(dl * 100).toFixed(0)}% vs LY</div>`;
       }
       return `<td style="${style}"><strong>${fcFmt(cl.ps)}</strong>${dTag}</td>`;
     };
