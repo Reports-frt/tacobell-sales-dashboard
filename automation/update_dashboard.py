@@ -789,6 +789,8 @@ def build_data_json(data, budget, hourly_data=None):
             'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
         },
         'budget':       budget_out,
+        # Year-keyed budget archive (preserved across years by merge_with_existing)
+        'budget_by_year': { str(datetime.now().year): budget_out },
         'records_st':   records_st,
         'records_type': records_type,
         'records_ch':   records_ch,
@@ -1318,6 +1320,15 @@ def merge_with_existing(new_json, json_path):
             
             new_json['hourly'] = n_hourly
     
+    # ===== Preserve budget archive (budget_by_year) =====
+    e_bby = existing.get('budget_by_year', {}) or {}
+    n_bby = new_json.get('budget_by_year', {}) or {}
+    merged_bby = dict(e_bby)
+    merged_bby.update(n_bby)
+    if merged_bby:
+        new_json['budget_by_year'] = merged_bby
+        log.info(f"  budget_by_year: years preserved = {sorted(merged_bby.keys())}")
+
     all_dates = [r[0] for r in new_json.get('records_st', [])]
     if all_dates:
         new_json['meta']['first_date'] = min(all_dates)
@@ -1374,6 +1385,22 @@ def main():
     log.info("#" * 60)
     log.info(f"# Taco Bell Dashboard Auto-Update — {started.strftime('%Y-%m-%d %H:%M:%S')}")
     log.info("#" * 60)
+
+    # --skip-if-fresh: afternoon RETRY task support. If the morning run already
+    # succeeded (latest_date is yesterday/today), exit quietly.
+    if '--skip-if-fresh' in sys.argv:
+        try:
+            json_path = os.path.join(CONFIG["repo_path"], "data.json")
+            with open(json_path, 'r', encoding='utf-8') as f:
+                latest = (json.load(f).get('meta', {}) or {}).get('latest_date')
+            if latest:
+                lag_days = (datetime.now().date() - datetime.strptime(latest, '%Y-%m-%d').date()).days
+                if lag_days <= 1:
+                    log.info(f"Data is fresh (latest_date={latest}, lag={lag_days}d) — retry not needed. Exiting.")
+                    return
+                log.info(f"Data is STALE (latest_date={latest}, lag={lag_days}d) — morning run failed, retrying now...")
+        except Exception as e:
+            log.warning(f"--skip-if-fresh check failed ({e}) — proceeding with full run.")
 
     try:
         # 1. Get attachment(s) from Outlook
