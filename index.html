@@ -7,7 +7,7 @@
 
 <!-- PWA: Manifest, theme colors, icons -->
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#e4002b">
+<meta name="theme-color" content="#702082">
 <meta name="background-color" content="#0a0e14">
 
 <!-- iOS Safari support -->
@@ -67,7 +67,7 @@ html, body {
 
 body {
   background:
-    radial-gradient(ellipse at top, rgba(228,0,43,0.05) 0%, transparent 50%),
+    radial-gradient(ellipse at top, rgba(112,32,130,0.05) 0%, transparent 50%),
     var(--bg-0);
   min-height: 100vh;
 }
@@ -127,7 +127,7 @@ body {
 
 /* ============== HEADER (mobile base) ============== */
 .header {
-  background: linear-gradient(180deg, rgba(228,0,43,0.1) 0%, var(--bg-1) 100%);
+  background: linear-gradient(180deg, rgba(112,32,130,0.1) 0%, var(--bg-1) 100%);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 12px 14px;
@@ -827,7 +827,7 @@ body {
   background: var(--accent);
   color: white;
   font-weight: 600;
-  box-shadow: 0 2px 6px rgba(228,0,43,0.25);
+  box-shadow: 0 2px 6px rgba(112,32,130,0.25);
 }
 input[type="date"], select { background: var(--bg-2); color: var(--text-0); border: 1px solid var(--border); padding: 8px 10px; border-radius: 6px; font-size: 13px; font-family: var(--sans); width: 100%; }
 input[type="date"]:focus, select:focus { outline: none; border-color: var(--accent); }
@@ -947,7 +947,7 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
 .card.accent { border-left: 3px solid var(--accent); padding-left: 10px; }
 .card.accent-2 { border-left: 3px solid var(--accent-2); padding-left: 10px; }
 .card.good { border-left: 3px solid var(--good); padding-left: 10px; }
-.card.grand { border-left: 3px solid var(--kfc); background: linear-gradient(180deg, rgba(228,0,43,0.12) 0%, rgba(228,0,43,0.05) 100%); padding-left: 10px; }
+.card.grand { border-left: 3px solid var(--kfc); background: linear-gradient(180deg, rgba(112,32,130,0.12) 0%, rgba(112,32,130,0.05) 100%); padding-left: 10px; }
 .card.subcard { background: var(--bg-3); margin-left: 12px; max-width: calc(100% - 12px); }
 .card-title { font-size: 13px; font-weight: 700; color: var(--text-0); margin-bottom: 8px; padding-bottom: 6px; border-bottom: 1px solid var(--border-soft); display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; }
 .card-title .name { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1054,9 +1054,9 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
     color: var(--text-0);
     font-family: var(--sans);
   }
-  .desktop-table tbody tr:hover td { background: rgba(228,0,43,0.05); }
+  .desktop-table tbody tr:hover td { background: rgba(112,32,130,0.05); }
   .desktop-table tbody tr.row-grand td {
-    background: linear-gradient(180deg, rgba(228,0,43,0.15) 0%, rgba(228,0,43,0.05) 100%);
+    background: linear-gradient(180deg, rgba(112,32,130,0.15) 0%, rgba(112,32,130,0.05) 100%);
     font-weight: 700;
     color: var(--text-0);
     border-bottom: 1px solid var(--accent);
@@ -4708,7 +4708,7 @@ function renderHourly(R) {
       const intensity = maxCell > 0 ? Math.min(0.92, v / maxCell) : 0;
       let bg = 'var(--bg-2)';
       let col = v === 0 ? 'var(--text-2)' : (intensity > 0.5 ? 'white' : 'var(--text-0)');
-      if (v > 0) bg = `rgba(228,0,43,${intensity.toFixed(2)})`;
+      if (v > 0) bg = `rgba(112,32,130,${intensity.toFixed(2)})`;
       const txt = v === 0 ? '·' : (v >= 1000 ? Math.round(v/1000) + 'K' : Math.round(v));
       heatHTML += `<div class="heat-cell" style="background:${bg};color:${col}" title="${STORE_META[STORES[s.si]].short} · ${String(h).padStart(2,'0')}:00 · ${fmtEur(v)}">${txt}</div>`;
     }
@@ -4742,7 +4742,7 @@ function renderHourly(R) {
     for (const h of hours) {
       const v = (hourlyByYearDowHour[cyYear] && hourlyByYearDowHour[cyYear][dow] && hourlyByYearDowHour[cyYear][dow][h]) || 0;
       const intensity = maxDH > 0 ? Math.min(0.92, v / maxDH) : 0;
-      let bg = v > 0 ? `rgba(228,0,43,${intensity.toFixed(2)})` : 'var(--bg-2)';
+      let bg = v > 0 ? `rgba(112,32,130,${intensity.toFixed(2)})` : 'var(--bg-2)';
       const col = v === 0 ? 'var(--text-2)' : (intensity > 0.5 ? 'white' : 'var(--text-0)');
       const txt = v === 0 ? '·' : (v >= 1000 ? Math.round(v/1000) + 'K' : Math.round(v));
       dowHtml += `<div class="heat-cell" style="background:${bg};color:${col}" title="${dowName(dow)} · ${String(h).padStart(2,'0')}:00 · ${fmtEur(v)}">${txt}</div>`;
@@ -7001,7 +7001,7 @@ function drawWeekdayHourHeatmap(R, container) {
       // Color scheme: dark grey baseline → bright KFC red at max
       // Always show a visible cell even at low intensity (not transparent)
       const baseR = 30, baseG = 38, baseB = 46;       // dark slate at intensity 0
-      const peakR = 239, peakG = 68, peakB = 68;      // KFC bright red at intensity 1
+      const peakR = 192, peakG = 38, peakB = 211;     // TB fuchsia at intensity 1
       const r = Math.round(baseR + (peakR - baseR) * intensity);
       const g = Math.round(baseG + (peakG - baseG) * intensity);
       const b = Math.round(baseB + (peakB - baseB) * intensity);
