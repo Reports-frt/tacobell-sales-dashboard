@@ -857,7 +857,7 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
 .kpi-sub { display: flex; flex-direction: column; gap: 3px; margin-top: 6px; font-size: 10px; }
 .kpi-sub .row { display: flex; justify-content: space-between; align-items: center; gap: 6px; min-width: 0; }
 .kpi-sub .versus { color: var(--text-2); font-family: var(--mono); font-size: 8.5px; letter-spacing: 0.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.kpi-sub .delta { font-family: var(--mono); font-weight: 600; font-size: 10px; padding: 1px 5px; border-radius: 3px; flex-shrink: 0; white-space: nowrap; }
+.kpi-sub .delta { font-family: var(--mono); font-weight: 700; font-size: 12px; padding: 2px 7px; border-radius: 4px; flex-shrink: 0; white-space: nowrap; }
 .delta.pos, .pct.pos { color: var(--good); background: var(--good-soft); }
 .delta.neg, .pct.neg { color: var(--bad); background: var(--bad-soft); }
 .delta.flat, .pct.flat { color: var(--neutral); background: rgba(100,116,139,0.12); }
@@ -956,7 +956,7 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
 .card-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; min-width: 0; font-size: 12px; min-height: 20px; }
 .card-row .lbl { font-family: var(--mono); font-size: 9px; color: var(--text-2); letter-spacing: 0.5px; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; }
 .card-row .val { font-family: var(--mono); font-variant-numeric: tabular-nums; font-weight: 500; color: var(--text-0); font-size: 12px; white-space: nowrap; flex-shrink: 0; }
-.pct { font-family: var(--mono); font-weight: 600; font-size: 10px; padding: 1px 5px; border-radius: 3px; white-space: nowrap; flex-shrink: 0; }
+.pct { font-family: var(--mono); font-weight: 700; font-size: 12px; padding: 2px 7px; border-radius: 4px; white-space: nowrap; flex-shrink: 0; }
 .subsection-header { background: var(--kfc); color: white; font-weight: 700; font-size: 13px; padding: 8px 12px; border-radius: 6px; margin: 12px 0 6px 0; }
 .subsection-header:first-child { margin-top: 0; }
 .mini-bar { display: inline-block; height: 4px; background: var(--bg-3); border-radius: 2px; overflow: hidden; vertical-align: middle; flex: 1; min-width: 30px; }
@@ -1608,6 +1608,7 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
       <button class="tab" data-tab="trend">Trend</button>
       <button class="tab" data-tab="storedeep">Store Deep-Dive</button>
       <button class="tab" data-tab="multiyear">📈 Πολυετές</button>
+    <button class="tab" data-tab="forecast">🔮 Forecast</button>
       <button class="tab" data-tab="insights">📊 Insights</button>
       <button class="tab" data-tab="hourly" id="hourlyTabBtn">Hourly</button>
     </div>
@@ -1623,6 +1624,7 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
     <div class="tab-content" id="tab-trend"></div>
     <div class="tab-content" id="tab-storedeep"></div>
     <div class="tab-content" id="tab-multiyear"></div>
+  <div class="tab-content" id="tab-forecast"></div>
     <div class="tab-content" id="tab-insights"></div>
     <div class="tab-content" id="tab-hourly"></div>
   </div>
@@ -1787,7 +1789,6 @@ const STORE_GEO = {
   'TB HALANDRI':      { lat: 38.0217, lng: 23.8000, addr: 'Χαλάνδρι', region: 'Βόρεια Προάστια' },
   'TB AMPELOKIPOI':   { lat: 37.9885, lng: 23.7520, addr: 'Πανόρμου, Αμπελόκηποι', region: 'Κέντρο Αθήνας' },
   'TB KYPSELI':       { lat: 38.0030, lng: 23.7400, addr: 'Κυψέλη', region: 'Κέντρο Αθήνας' },
-  // Aliases (σε περίπτωση που το pipeline βγάζει ελληνικά ονόματα)
   'TB ΧΑΛΑΝΔΡΙ':      { lat: 38.0217, lng: 23.8000, addr: 'Χαλάνδρι', region: 'Βόρεια Προάστια' },
   'TB ΑΜΠΕΛΟΚΗΠΟΙ':   { lat: 37.9885, lng: 23.7520, addr: 'Πανόρμου, Αμπελόκηποι', region: 'Κέντρο Αθήνας' },
   'TB ΚΥΨΕΛΗ':        { lat: 38.0030, lng: 23.7400, addr: 'Κυψέλη', region: 'Κέντρο Αθήνας' },
@@ -2651,6 +2652,9 @@ const STATE = {
   maturity: "all",        // all | same | new
   hourlyChannels: [],     // hourly tab channel multi-select (empty = όλα); keys: group keys ή channel names
   trendMetric: "sales",   // Daily Trend metric: sales | tcs | avg
+  fcMonth: null,          // Forecast tab: selected month for per-store table (null = next month auto)
+  fcDay: null,            // Forecast tab: selected day for hourly view (null = tomorrow auto)
+  fcStore: 'ALL',         // Forecast tab hourly: 'ALL' or store index
   storeType: "all",       // all | "In Line" | "Mall Food Court" | etc
   storeSelection: null,   // null = all stores, or Set of store indices
   channelView: "type",    // "type" (View A) or "salestype" (View B)
@@ -4972,6 +4976,386 @@ function renderHourly(R) {
 // MAIN DISPATCH
 // =====================================================================
 let _cachedR = null;
+// =====================================================================
+// FORECAST TAB — Projected vs Budget vs LY, down to the HOUR
+// Methodology:
+//   momentum      = same-store YoY of the trailing 28 days (sales & TCs separately)
+//   day forecast  = LY-364 same day × momentum   (new stores: 28d run-rate × store DOW factor × chain seasonality)
+//   month         = MTD actual + Σ projected remaining days
+//   hourly        = day forecast × store's DOW-specific hourly share (from per-date hourly history)
+//   budget phase  = getDayBudget (monthly budget split by LY daily shape)
+// =====================================================================
+const _fc = { hsdIdx: null, momentum: null, seasonality: null, dowFactor: null };
+
+function _fcAddDays(ds, n) { const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
+
+function fcHsdIdx() {
+  // hsdIdx[si][dateStr] = {hour: sales}
+  if (_fc.hsdIdx) return _fc.hsdIdx;
+  const idx = {};
+  if (HOURLY && Array.isArray(HOURLY.records_hsd) && Array.isArray(HOURLY.dates)) {
+    HOURLY.records_hsd.forEach(r => {
+      const [di, si, h, s] = r;
+      const ds = HOURLY.dates[di];
+      if (!ds) return;
+      (idx[si] = idx[si] || {});
+      (idx[si][ds] = idx[si][ds] || {});
+      idx[si][ds][h] = (idx[si][ds][h] || 0) + s;
+    });
+  }
+  _fc.hsdIdx = idx;
+  return idx;
+}
+
+function fcMomentum() {
+  // Per-store trailing-28d YoY (sales & tcs). null components when no LY base.
+  if (_fc.momentum) return _fc.momentum;
+  const out = {};
+  const end = LATEST;
+  for (let si = 0; si < STORES.length; si++) {
+    let cs = 0, ct = 0, ls = 0, lt = 0, days = 0;
+    for (let k = 0; k < 28; k++) {
+      const d = _fcAddDays(end, -k);
+      const a = dailyStore.get(d);
+      if (!a || a[si].sales <= 0) continue;
+      const lyd = lyDate(d, '364');
+      const la = dailyStore.get(lyd);
+      cs += a[si].sales; ct += a[si].tcs;
+      if (la && la[si].sales > 0) { ls += la[si].sales; lt += la[si].tcs; days++; }
+    }
+    out[si] = {
+      s: (days >= 14 && ls > 0) ? cs && (csOverLs(cs, ls, days, 28)) : null,
+      t: (days >= 14 && lt > 0) ? ct / lt * (days / Math.max(1, daysWithData(si, end))) : null,
+      hasLY: days >= 14,
+      runrate_s: 0, runrate_t: 0,
+    };
+    // Simpler & correct: momentum only over the matched days
+    let cs2 = 0, ct2 = 0, ls2 = 0, lt2 = 0, n2 = 0, rs = 0, rt = 0, rn = 0;
+    for (let k = 0; k < 28; k++) {
+      const d = _fcAddDays(end, -k);
+      const a = dailyStore.get(d);
+      if (!a || a[si].sales <= 0) continue;
+      rs += a[si].sales; rt += a[si].tcs; rn++;
+      const la = dailyStore.get(lyDate(d, '364'));
+      if (la && la[si].sales > 0) { cs2 += a[si].sales; ct2 += a[si].tcs; ls2 += la[si].sales; lt2 += la[si].tcs; n2++; }
+    }
+    out[si] = {
+      s: (n2 >= 14 && ls2 > 0) ? cs2 / ls2 : null,
+      t: (n2 >= 14 && lt2 > 0) ? ct2 / lt2 : null,
+      hasLY: n2 >= 14,
+      runrate_s: rn > 0 ? rs / rn : 0,
+      runrate_t: rn > 0 ? rt / rn : 0,
+      days: rn,
+    };
+  }
+  _fc.momentum = out;
+  return out;
+}
+function csOverLs(a, b) { return b > 0 ? a / b : null; }  // helper (legacy)
+function daysWithData() { return 28; }
+
+function fcChainSeasonality() {
+  // month factor from LY chain: month avg-daily / year avg-daily
+  if (_fc.seasonality) return _fc.seasonality;
+  const lyYear = parseInt(LATEST.slice(0, 4)) - 1;
+  const mSum = new Array(13).fill(0), mDays = new Array(13).fill(0);
+  dailyTotal.forEach((v, d) => {
+    if (parseInt(d.slice(0, 4)) !== lyYear || v.sales <= 0) return;
+    const m = parseInt(d.slice(5, 7));
+    mSum[m] += v.sales; mDays[m]++;
+  });
+  let tot = 0, totD = 0;
+  for (let m = 1; m <= 12; m++) { tot += mSum[m]; totD += mDays[m]; }
+  const avg = totD > 0 ? tot / totD : 0;
+  const f = new Array(13).fill(1);
+  for (let m = 1; m <= 12; m++) f[m] = (mDays[m] >= 20 && avg > 0) ? (mSum[m] / mDays[m]) / avg : 1;
+  _fc.seasonality = f;
+  return f;
+}
+
+function fcStoreDowFactor(si) {
+  // store DOW factor from trailing 8 weeks: dow avg / overall avg
+  if (!_fc.dowFactor) _fc.dowFactor = {};
+  if (_fc.dowFactor[si]) return _fc.dowFactor[si];
+  const sum = new Array(7).fill(0), n = new Array(7).fill(0);
+  for (let k = 0; k < 56; k++) {
+    const d = _fcAddDays(LATEST, -k);
+    const a = dailyStore.get(d);
+    if (!a || a[si].sales <= 0) continue;
+    const dow = new Date(d + 'T12:00:00').getDay();
+    sum[dow] += a[si].sales; n[dow]++;
+  }
+  let tot = 0, totN = 0;
+  for (let i = 0; i < 7; i++) { tot += sum[i]; totN += n[i]; }
+  const avg = totN > 0 ? tot / totN : 0;
+  const f = new Array(7).fill(1);
+  for (let i = 0; i < 7; i++) f[i] = (n[i] >= 3 && avg > 0) ? (sum[i] / n[i]) / avg : 1;
+  _fc.dowFactor[si] = f;
+  return f;
+}
+
+// Projected {s, t} for a FUTURE (or any) day for one store
+function fcDayProj(si, ds) {
+  const mom = fcMomentum()[si];
+  const lyd = lyDate(ds, '364');
+  const la = dailyStore.get(lyd);
+  if (mom.hasLY && la && la[si].sales > 0) {
+    return {
+      s: la[si].sales * (mom.s || 1),
+      t: la[si].tcs * (mom.t || 1),
+      basis: 'ly×mom',
+    };
+  }
+  // New store: run-rate × DOW factor × seasonality shift (relative to current month)
+  const dow = new Date(ds + 'T12:00:00').getDay();
+  const seas = fcChainSeasonality();
+  const mNow = parseInt(LATEST.slice(5, 7)), mTarget = parseInt(ds.slice(5, 7));
+  const sShift = (seas[mNow] > 0) ? seas[mTarget] / seas[mNow] : 1;
+  return {
+    s: mom.runrate_s * fcStoreDowFactor(si)[dow] * sShift,
+    t: mom.runrate_t * fcStoreDowFactor(si)[dow] * sShift,
+    basis: 'runrate',
+  };
+}
+
+// Aggregate day forecast over the store filter. Actual for past days.
+function fcDayAgg(ds, storeFilter) {
+  let s = 0, t = 0, anyRun = false;
+  const isPast = ds <= LATEST;
+  const a = isPast ? dailyStore.get(ds) : null;
+  for (let si = 0; si < STORES.length; si++) {
+    if (storeFilter && !storeFilter.has(si)) continue;
+    if (isPast && a && a[si].sales > 0) { s += a[si].sales; t += a[si].tcs; continue; }
+    if (isPast) continue;  // past day, no data — skip (closed)
+    const p = fcDayProj(si, ds);
+    s += p.s; t += p.t;
+    if (p.basis === 'runrate') anyRun = true;
+  }
+  return { s, t, actual: isPast, anyRun };
+}
+
+function fcDayBudget(ds, storeFilter) {
+  let s = 0, t = 0;
+  for (let si = 0; si < STORES.length; si++) {
+    if (storeFilter && !storeFilter.has(si)) continue;
+    const b = getDayBudget(ds, si, '364');
+    s += b.sales; t += (b.tcs || 0);
+  }
+  return { s, t };
+}
+
+// Hourly shares for a store×dow from per-date hourly history (last ~8 occurrences)
+function fcHourShares(si, dow) {
+  const idx = fcHsdIdx()[si];
+  const shares = {};
+  if (!idx) return null;
+  const dates = Object.keys(idx).sort().reverse();
+  let used = 0;
+  const sums = {};
+  let total = 0;
+  for (const ds of dates) {
+    if (new Date(ds + 'T12:00:00').getDay() !== dow) continue;
+    const hrs = idx[ds];
+    let daySum = 0;
+    Object.values(hrs).forEach(v => daySum += v);
+    if (daySum <= 0) continue;
+    Object.entries(hrs).forEach(([h, v]) => { sums[h] = (sums[h] || 0) + v; });
+    total += daySum;
+    if (++used >= 8) break;
+  }
+  if (used === 0 || total <= 0) return null;
+  Object.entries(sums).forEach(([h, v]) => { shares[h] = v / total; });
+  return shares;
+}
+
+const FC_MONTH_GR = ['', 'Ιανουάριος', 'Φεβρουάριος', 'Μάρτιος', 'Απρίλιος', 'Μάιος', 'Ιούνιος', 'Ιούλιος', 'Αύγουστος', 'Σεπτέμβριος', 'Οκτώβριος', 'Νοέμβριος', 'Δεκέμβριος'];
+const FC_DOW_GR = ['Κυρ', 'Δευ', 'Τρι', 'Τετ', 'Πεμ', 'Παρ', 'Σαβ'];
+
+window.setFcMonth = function(m) { STATE.fcMonth = m; renderActive(); };
+window.setFcDay = function(d) { STATE.fcDay = d; renderActive(); };
+window.setFcStore = function(v) { STATE.fcStore = v; renderActive(); };
+
+function renderForecast(R) {
+  const root = document.getElementById('tab-forecast');
+  const sf = R.storeFilter;
+  const year = parseInt(LATEST.slice(0, 4));
+  const curMonth = parseInt(LATEST.slice(5, 7));
+  const budget = budgetForYear(year) || {};
+  const mom = fcMomentum();
+
+  const fmtK = v => v >= 1e6 ? (v / 1e6).toFixed(2).replace('.', ',') + 'M€' : Math.round(v / 1e3) + 'K€';
+  const dPct = (p, b) => (b > 0 && p > 0) ? pctTag(p / b - 1) : '<span class="pct flat">—</span>';
+
+  // Month-level budget for filtered stores
+  function monthBudget(m) {
+    let s = 0, t = 0;
+    for (let si = 0; si < STORES.length; si++) {
+      if (sf && !sf.has(si)) continue;
+      const b = budget[STORES[si]];
+      if (b && b[String(m)]) { s += b[String(m)].Sales || 0; t += b[String(m)].TCs || 0; }
+    }
+    return { s, t };
+  }
+
+  // Month projection: sum of days (actual past + projected future)
+  function monthProj(m) {
+    const dim = new Date(year, m, 0).getDate();
+    let s = 0, t = 0, anyRun = false, actualDays = 0, projDays = 0;
+    for (let d = 1; d <= dim; d++) {
+      const ds = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const r = fcDayAgg(ds, sf);
+      s += r.s; t += r.t;
+      if (r.actual) actualDays++; else projDays++;
+      if (r.anyRun) anyRun = true;
+    }
+    return { s, t, anyRun, actualDays, projDays };
+  }
+
+  let html = `
+    <div class="insight" style="border-left-color: var(--accent)">
+      <div class="ins-label">🔮 Πώς υπολογίζεται</div>
+      <div class="ins-text">Projected = περσινή ίδια μέρα εβδομάδας (364-shift) × <strong>momentum</strong> (YoY τελευταίων 28 ημερών ανά store). Νέα stores χωρίς πέρσι: run-rate 28 ημερών × DOW pattern × seasonality αλυσίδας. Τρέχων μήνας = MTD actual + projected υπόλοιπο. Budget ημέρας/εβδομάδας = μηνιαίο budget × περσινό daily shape. <strong>Το store filter εφαρμόζεται.</strong></div>
+    </div>`;
+
+  // ============ SECTION 1: MONTHLY to year-end ============
+  const holidayNote = (m) => {
+    const from = `${year}-${String(m).padStart(2,'0')}-01`;
+    const to = `${year}-${String(m).padStart(2,'0')}-${String(new Date(year, m, 0).getDate()).padStart(2,'0')}`;
+    const hm = holidayMismatch(from, to, '364');
+    if (!hm) return '';
+    const parts = [];
+    if (hm.onlyCY.length) parts.push('+' + hm.onlyCY.join(', '));
+    if (hm.onlyLY.length) parts.push('πέρσι: ' + hm.onlyLY.join(', '));
+    return `<span title="Διαφορά αργιών vs πέρσι — επηρεάζει το projection" style="cursor:help">🎉 ${parts.join(' · ')}</span>`;
+  };
+
+  html += `<div class="panel-section">
+    <div class="section-title"><span>Μηνιαία πρόβλεψη — ${year}</span><span class="meta">Projected vs Budget · μέχρι τέλος έτους</span></div>
+    <table class="desktop-table"><thead><tr>
+      <th>Μήνας</th><th>Proj Sales</th><th>Budget</th><th>Δ Sales</th>
+      <th>Proj TCs</th><th>Bud TCs</th><th>Δ TCs</th>
+      <th>Proj AVG</th><th>Bud AVG</th><th>Αργίες</th>
+    </tr></thead><tbody>`;
+  for (let m = curMonth; m <= 12; m++) {
+    const p = monthProj(m), b = monthBudget(m);
+    const pAvg = p.t > 0 ? p.s / p.t : null, bAvg = b.t > 0 ? b.s / b.t : null;
+    const isCur = m === curMonth;
+    html += `<tr ${isCur ? 'style="background: rgba(192,38,211,0.06)"' : ''}>
+      <td><strong>${FC_MONTH_GR[m]}</strong>${isCur ? ` <span style="font-size:9px;color:var(--text-2)">(${p.actualDays} actual + ${p.projDays} proj)</span>` : ''}${p.anyRun ? ' <span title="Περιλαμβάνει store σε run-rate basis (χωρίς LY)" style="font-size:9px">🆕</span>' : ''}</td>
+      <td><strong>${fmtK(p.s)}</strong></td>
+      <td>${b.s > 0 ? fmtK(b.s) : '—'}</td>
+      <td>${dPct(p.s, b.s)}</td>
+      <td>${fmtNum(p.t)}</td>
+      <td>${b.t > 0 ? fmtNum(b.t) : '—'}</td>
+      <td>${dPct(p.t, b.t)}</td>
+      <td>${pAvg != null ? fmtAvg(pAvg) : '—'}</td>
+      <td>${bAvg != null ? fmtAvg(bAvg) : '—'}</td>
+      <td style="font-size:9px">${holidayNote(m)}</td>
+    </tr>`;
+  }
+  html += `</tbody></table></div>`;
+
+  // ============ SECTION 2: WEEKLY (current + next 5) ============
+  // find Monday of current week
+  const todayD = new Date(LATEST + 'T12:00:00');
+  const monOff = (todayD.getDay() + 6) % 7;
+  const curMon = _fcAddDays(LATEST, -monOff);
+  html += `<div class="panel-section">
+    <div class="section-title"><span>Εβδομαδιαία πρόβλεψη</span><span class="meta">τρέχουσα + 5 επόμενες</span></div>
+    <table class="desktop-table"><thead><tr>
+      <th>Εβδομάδα</th><th>Proj Sales</th><th>Budget</th><th>Δ Sales</th>
+      <th>Proj TCs</th><th>Δ TCs</th><th>Proj AVG</th><th></th>
+    </tr></thead><tbody>`;
+  for (let w = 0; w < 6; w++) {
+    const wStart = _fcAddDays(curMon, w * 7);
+    const wEnd = _fcAddDays(wStart, 6);
+    let ps = 0, pt = 0, bs = 0, bt = 0, anyRun = false, hols = [];
+    for (let d = 0; d < 7; d++) {
+      const ds = _fcAddDays(wStart, d);
+      const r = fcDayAgg(ds, sf); ps += r.s; pt += r.t; if (r.anyRun) anyRun = true;
+      const b = fcDayBudget(ds, sf); bs += b.s; bt += b.t;
+      const hn = holidayName(ds); if (hn) hols.push(hn);
+    }
+    const [sy, sm, sd] = wStart.split('-'), [ey, em, ed] = wEnd.split('-');
+    html += `<tr ${w === 0 ? 'style="background: rgba(192,38,211,0.06)"' : ''}>
+      <td><strong>${+sd}/${+sm} – ${+ed}/${+em}</strong>${w === 0 ? ' <span style="font-size:9px;color:var(--text-2)">(τρέχουσα)</span>' : ''}</td>
+      <td><strong>${fmtK(ps)}</strong></td>
+      <td>${bs > 0 ? fmtK(bs) : '—'}</td>
+      <td>${dPct(ps, bs)}</td>
+      <td>${fmtNum(pt)}</td>
+      <td>${dPct(pt, bt)}</td>
+      <td>${pt > 0 ? fmtAvg(ps / pt) : '—'}</td>
+      <td style="font-size:9px">${hols.length ? '🎉 ' + hols.join(', ') : ''}${anyRun ? ' 🆕' : ''}</td>
+    </tr>`;
+  }
+  html += `</tbody></table></div>`;
+
+  // ============ SECTION 3: HOURLY forecast for a chosen day ============
+  const fcDay = STATE.fcDay || _fcAddDays(LATEST, 1);
+  const dayChips = [];
+  for (let k = 1; k <= 8; k++) {
+    const ds = _fcAddDays(LATEST, k);
+    const dd = new Date(ds + 'T12:00:00');
+    dayChips.push({ ds, label: `${FC_DOW_GR[dd.getDay()]} ${dd.getDate()}/${dd.getMonth() + 1}` });
+  }
+  const storeOpts = ['<option value="ALL">Όλη η αλυσίδα</option>'];
+  for (let si = 0; si < STORES.length; si++) {
+    if (sf && !sf.has(si)) continue;
+    storeOpts.push(`<option value="${si}" ${String(STATE.fcStore) === String(si) ? 'selected' : ''}>${STORE_META[STORES[si]]?.short || STORES[si]}</option>`);
+  }
+
+  // compute hourly projection
+  const dow = new Date(fcDay + 'T12:00:00').getDay();
+  const hourAgg = {};
+  let dayS = 0, dayT = 0;
+  const targets = STATE.fcStore === 'ALL' ? null : new Set([parseInt(STATE.fcStore)]);
+  for (let si = 0; si < STORES.length; si++) {
+    if (sf && !sf.has(si)) continue;
+    if (targets && !targets.has(si)) continue;
+    const p = fcDayProj(si, fcDay);
+    dayS += p.s; dayT += p.t;
+    const shares = fcHourShares(si, dow);
+    if (shares) {
+      Object.entries(shares).forEach(([h, sh]) => { hourAgg[h] = (hourAgg[h] || 0) + p.s * sh; });
+    }
+  }
+  const dayAvt = dayT > 0 ? dayS / dayT : null;
+  const hoursSorted = Object.keys(hourAgg).map(Number).sort((a, b) => {
+    const oa = a < 6 ? a + 24 : a, ob = b < 6 ? b + 24 : b;  // late-night after evening
+    return oa - ob;
+  }).filter(h => hourAgg[h] > 1);
+  const maxH = Math.max(1, ...hoursSorted.map(h => hourAgg[h]));
+  const hn2 = holidayName(fcDay);
+
+  html += `<div class="panel-section">
+    <div class="section-title"><span>Ωριαία πρόβλεψη</span><span class="meta">DOW-specific ωριαίο profile ανά store (τελευταίες 8 ${FC_DOW_GR[dow]})</span></div>
+    <div class="filter-row" style="margin-bottom:10px">
+      <div class="filter-group"><span class="label">Ημέρα</span><div class="chip-row">
+        ${dayChips.map(d => `<span class="chip ${d.ds === fcDay ? 'active' : ''}" onclick="window.setFcDay('${d.ds}')">${d.label}</span>`).join('')}
+      </div></div>
+      <div class="filter-group"><span class="label">Store</span>
+        <select onchange="window.setFcStore(this.value)" style="background:var(--bg-2);color:var(--text-0);border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:12px">${storeOpts.join('')}</select>
+      </div>
+    </div>
+    <div style="font-size:12px;margin-bottom:10px">
+      <strong>${(() => { const dd = new Date(fcDay + 'T12:00:00'); return FC_DOW_GR[dd.getDay()] + ' ' + dd.getDate() + '/' + (dd.getMonth() + 1); })()}</strong>
+      ${hn2 ? `<span style="color:#a855f7"> · 🎉 ${hn2} — το projection ΔΕΝ προσαρμόζεται αυτόματα για αργίες</span>` : ''}
+      · Projected ημέρας: <strong>${fmtK(dayS)}</strong> · ~${fmtNum(dayT)} TCs · AVG ${dayAvt ? fmtAvg(dayAvt) : '—'}
+    </div>
+    ${hoursSorted.length ? `<table class="desktop-table" style="max-width:640px"><thead><tr><th>Ώρα</th><th>Proj Sales</th><th style="width:45%"></th><th>~TCs</th></tr></thead><tbody>
+      ${hoursSorted.map(h => {
+        const v = hourAgg[h];
+        const tcs = dayAvt ? Math.round(v / dayAvt) : null;
+        return `<tr><td>${String(h).padStart(2, '0')}:00</td><td><strong>${Math.round(v).toLocaleString('el-GR')}€</strong></td>
+          <td><div class="mini-bar" style="width:100%"><div style="width:${(v / maxH * 100).toFixed(0)}%"></div></div></td>
+          <td>${tcs != null ? tcs : '—'}</td></tr>`;
+      }).join('')}
+    </tbody></table>` : `<p style="color:var(--text-2);font-size:12px">Δεν υπάρχει αρκετό ωριαίο ιστορικό για αυτό το store/ημέρα (χρειάζονται per-date hourly δεδομένα).</p>`}
+  </div>`;
+
+  root.innerHTML = html;
+}
+
 function renderActive() {
   if (!_cachedR) _cachedR = compute();
   const R = _cachedR;
@@ -4981,7 +5365,7 @@ function renderActive() {
     overview: renderOverview, bystore: renderByStore, salestype: renderSalesType,
     channels: renderChannels, rankings: renderRankings, dow: renderDOW,
     trend: renderTrend, storedeep: renderStoreDeep, hourly: renderHourly,
-    insights: renderInsights, multiyear: renderMultiyear,
+    insights: renderInsights, multiyear: renderMultiyear, forecast: renderForecast,
   };
   map[STATE.activeTab](R);
   _injectTableExportButtons();
