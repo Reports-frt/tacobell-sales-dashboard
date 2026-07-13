@@ -1610,6 +1610,7 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
       <button class="tab" data-tab="rankings">Rankings</button>
       <button class="tab" data-tab="dow">Day-of-Week</button>
       <button class="tab" data-tab="trend">Trend</button>
+      <button class="tab" data-tab="weekly">Weekly vs LY</button>
       <button class="tab" data-tab="storedeep">Store Deep-Dive</button>
       <button class="tab" data-tab="multiyear">📈 Πολυετές</button>
     <button class="tab" data-tab="forecast">🔮 Forecast</button>
@@ -1629,6 +1630,7 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
     <div class="tab-content" id="tab-storedeep"></div>
     <div class="tab-content" id="tab-multiyear"></div>
   <div class="tab-content" id="tab-forecast"></div>
+  <div class="tab-content" id="tab-weekly"></div>
     <div class="tab-content" id="tab-insights"></div>
     <div class="tab-content" id="tab-hourly"></div>
   </div>
@@ -1778,6 +1780,48 @@ async function startApp() {
 // MAIN APPLICATION
 // =====================================================================
 function bootstrap(RAW) {
+
+// =====================================================================
+// SAFETY NET — Αγνόησε πωλήσεις με ημερομηνία μετά το χθες.
+// POS λάθη (παραγγελία κομμένη σε λάθος/μελλοντική μέρα) μολύνουν
+// MTD, «Χθες» strip, momentum και forecast. Το dashboard δείχνει
+// δεδομένα ΜΟΝΟ μέχρι και την χθεσινή ημέρα — ό,τι νεότερο απορρίπτεται
+// εδώ, ακόμα κι αν υπάρχει στο data.json.
+// =====================================================================
+const DATA_CUTOFF = (() => {
+  const d = new Date();
+  d.setDate(d.getDate() - 1);   // χθες, τοπική ώρα (όχι UTC — μετράει στις 00:00-03:00)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+})();
+let FUTURE_DROPPED = 0;
+(function sanitizeFutureData() {
+  try {
+    if (Array.isArray(RAW.records_st)) {
+      const n0 = RAW.records_st.length;
+      RAW.records_st = RAW.records_st.filter(r => r[0] <= DATA_CUTOFF);
+      FUTURE_DROPPED += n0 - RAW.records_st.length;
+    }
+    if (Array.isArray(RAW.records_ch)) {
+      const n0 = RAW.records_ch.length;
+      RAW.records_ch = RAW.records_ch.filter(r => r[0] <= DATA_CUTOFF);
+      FUTURE_DROPPED += n0 - RAW.records_ch.length;
+    }
+    if (RAW.hourly && Array.isArray(RAW.hourly.records_hsd) && Array.isArray(RAW.hourly.dates)) {
+      const okIdx = new Set();
+      RAW.hourly.dates.forEach((ds, i) => { if (ds <= DATA_CUTOFF) okIdx.add(i); });
+      const n0 = RAW.hourly.records_hsd.length;
+      RAW.hourly.records_hsd = RAW.hourly.records_hsd.filter(r => okIdx.has(r[0]));
+      FUTURE_DROPPED += n0 - RAW.hourly.records_hsd.length;
+    }
+    // Clamp το latest_date στο πραγματικό max των καθαρών δεδομένων
+    if (RAW.meta && RAW.meta.latest_date > DATA_CUTOFF) {
+      let maxD = null;
+      (RAW.records_st || []).forEach(r => { if (!maxD || r[0] > maxD) maxD = r[0]; });
+      RAW.meta.latest_date = maxD || DATA_CUTOFF;
+    }
+    if (FUTURE_DROPPED > 0) console.info(`[SafetyNet] Αγνοήθηκαν ${FUTURE_DROPPED} εγγραφές με ημερομηνία > ${DATA_CUTOFF}`);
+  } catch (e) { /* το safety net δεν σπάει ποτέ το load */ }
+})();
 
 const META = RAW.meta;
 const STORES = META.stores;
@@ -2138,13 +2182,16 @@ if (HOURLY) {
 
 // Returns true if records_hsd is present (per-date hourly data available)
 const HAS_DATE_HOURLY = HOURLY && Array.isArray(HOURLY.records_hsd) && HOURLY.records_hsd.length > 0;
+// TCs per hour: available only when the pipeline writes 5-element hsd rows [d,si,h,sales,tcs]
+const HAS_HOURLY_TCS = HAS_DATE_HOURLY && HOURLY.records_hsd[0].length >= 5;
 
 /**
  * Aggregate hourly sales from records_hsd, filtered by a date range and store filter.
  * Returns: { byStoreHour: {si: {hour: sales}}, byHour: {hour: sales}, total: number, byDowHour: {dow: {hour: sales}} }
  * Falls back to year-aggregate (records_hsc / hourlyByYearStoreHour) if records_hsd is missing.
  */
-function aggregateHourlyForRange(fromDate, toDate, storeFilter) {
+function aggregateHourlyForRange(fromDate, toDate, storeFilter, metric) {
+  // metric: 'sales' (default) | 'tcs' — tcs needs 5-element hsd rows [d,si,h,sales,tcs]
   const byStoreHour = {};
   const byHour = {};
   const byDowHour = {};
@@ -2175,7 +2222,8 @@ function aggregateHourlyForRange(fromDate, toDate, storeFilter) {
     }
     
     HOURLY.records_hsd.forEach(r => {
-      const [dateIdx, si, hour, sales] = r;
+      const [dateIdx, si, hour] = r;
+      const sales = (metric === 'tcs') ? (r[4] || 0) : r[3];
       const dateStr = dateInRange.get(dateIdx);
       if (!dateStr) return;
       if (storeFilter && !storeFilter.has(si)) return;
@@ -2658,6 +2706,9 @@ const STATE = {
   trendMetric: "sales",   // Daily Trend metric: sales | tcs | avg
   fcMonth: null,          // Forecast tab: selected month for per-store table (null = next month auto)
   fcMetric: "sales",      // Forecast tab: sales | tcs
+  hourlyMetric: "sales",  // Hourly tab: sales | tcs (tcs μόνο όταν HAS_HOURLY_TCS)
+  weeklyMetric: "sales",  // Weekly tab: sales | tcs | avg
+  weeklyRange: 13,        // Weekly tab: 8 | 13 | 0 (0 = όλες)
   fcDay: null,            // Forecast tab: selected day for hourly view (null = tomorrow auto)
   fcStore: 'ALL',         // Forecast tab hourly: 'ALL' or store index
   storeType: "all",       // all | "In Line" | "Mall Food Court" | etc
@@ -4356,6 +4407,11 @@ function renderHourly(R) {
   const allHours = HOURLY.hours.slice().sort((a,b) => a-b);
   const hours = allHours.filter(h => !DEAD_HOURS.has(h));
 
+  // === METRIC (sales | tcs) ===
+  // TCs διαθέσιμα μόνο με 5-element hsd rows (pipeline v2+) και σε date-range mode
+  const hMetric = (STATE.hourlyMetric === 'tcs' && HAS_HOURLY_TCS) ? 'tcs' : 'sales';
+  const hFmtVal = hMetric === 'tcs' ? (v => fmtNum(v)) : (v => fmtEurK(v));
+
   // === DATA SOURCE SELECTION ===
   // If records_hsd is available, use it for true date-range filtering.
   // Otherwise, fall back to year-aggregate.
@@ -4365,11 +4421,11 @@ function renderHourly(R) {
   
   if (useDateRange) {
     // CY: use the actual selected range
-    cyData = aggregateHourlyForRange(R.from, R.to, R.storeFilter);
+    cyData = aggregateHourlyForRange(R.from, R.to, R.storeFilter, hMetric);
     // LY: use the same range shifted by 364 days (or calendar year — match user's ly_mode)
     const lyFrom = lyDate(R.from, STATE.ly_mode);
     const lyTo = lyDate(R.to, STATE.ly_mode);
-    lyData = aggregateHourlyForRange(lyFrom, lyTo, R.storeFilter);
+    lyData = aggregateHourlyForRange(lyFrom, lyTo, R.storeFilter, hMetric);
     // Set "year" labels for display purposes
     cyYear = parseInt(R.from.slice(0, 4));
     lyYear = parseInt(lyFrom.slice(0, 4));
@@ -4397,7 +4453,8 @@ function renderHourly(R) {
   const channelLabelText = chSels.map(hourlyChannelLabel).join(' + ');
   let channelMode = false;
   let channelEstimated = false;
-  if (chSels.length > 0) {
+  if (chSels.length > 0 && hMetric === 'sales') {
+    // Channel filtering διαθέσιμο μόνο σε € (τα κανάλια δεν έχουν ωριαία TCs)
     const chIdxs = resolveHourlyChannelIdxsMulti(chSels);
     if (chIdxs && chIdxs.length) {
       channelMode = true;
@@ -4493,6 +4550,16 @@ function renderHourly(R) {
     ...Object.entries(HOURLY_CHANNEL_GROUPS).map(([k, g]) => ({ key: k, label: g.label })),
     ...CHANNELS.map(c => ({ key: c, label: c })),
   ];
+  // Metric toggle (TCs μόνο όταν τα δεδομένα το υποστηρίζουν)
+  html += `<div class="trend-metric-bar">
+    <span class="tm-label">ΜΕΤΡΙΚΗ</span>
+    <button class="trend-metric-chip ${hMetric === 'sales' ? 'active' : ''}" onclick="window.setHourlyMetric('sales')">Πωλήσεις (€)</button>
+    ${HAS_HOURLY_TCS
+      ? `<button class="trend-metric-chip ${hMetric === 'tcs' ? 'active' : ''}" onclick="window.setHourlyMetric('tcs')">Συναλλαγές (TCs)</button>`
+      : `<button class="trend-metric-chip" disabled style="opacity:0.4;cursor:not-allowed" title="Χρειάζεται ενημέρωση pipeline: τα ωριαία δεδομένα δεν περιέχουν ακόμα συναλλαγές">Συναλλαγές (TCs) 🔒</button>`}
+    ${hMetric === 'tcs' ? '<span style="font-size:10px;color:var(--text-2);font-family:var(--mono)">Channel mix & Sales-mode sections σε €</span>' : ''}
+  </div>`;
+
   html += `<div class="hourly-ch-chips">
     <span class="hch-title">CHANNEL</span>
     ${chipDefs.map(d => `<button class="hch-chip ${(d.key === 'all' ? chSels.length === 0 : chSels.includes(d.key)) ? 'active' : ''} ${d.key.startsWith('grp_') || d.key === 'all' ? 'hch-group' : ''}" onclick="window.setHourlyChannel('${d.key}')">${d.label}</button>`).join('')}
@@ -4546,12 +4613,12 @@ function renderHourly(R) {
     <div class="hstat peak">
       <div class="hstat-label">Peak Hour</div>
       <div class="hstat-value">${String(peakHour).padStart(2,'0')}:00</div>
-      <div class="hstat-sub">${(peakShare*100).toFixed(1).replace('.',',')}% του ημερήσιου · ${fmtEurK(peakV)}</div>
+      <div class="hstat-sub">${(peakShare*100).toFixed(1).replace('.',',')}% του ημερήσιου · ${hFmtVal(peakV)}</div>
     </div>
     <div class="hstat dinein">
       <div class="hstat-label">Dine-in (KIOSK) Share</div>
       <div class="hstat-value">${(dineinShare*100).toFixed(1).replace('.',',')}%</div>
-      <div class="hstat-sub">${fmtEurK(chTotals[CHANNELS.indexOf('KIOSK')] || 0)}</div>
+      <div class="hstat-sub">${hFmtVal(chTotals[CHANNELS.indexOf('KIOSK')] || 0)}</div>
     </div>
     <div class="hstat delivery">
       <div class="hstat-label">Delivery Share</div>
@@ -4585,7 +4652,7 @@ function renderHourly(R) {
     const y = PAD.t + innerH * i / 4;
     const v = maxV - maxV * i / 4;
     svg += `<line x1="${PAD.l}" y1="${y}" x2="${SVG_W - PAD.r}" y2="${y}" stroke="var(--border-soft)" stroke-width="1"/>`;
-    svg += `<text x="${PAD.l-8}" y="${y+4}" text-anchor="end" fill="var(--text-2)" font-size="10" font-family="var(--mono)">${fmtEurK(v)}</text>`;
+    svg += `<text x="${PAD.l-8}" y="${y+4}" text-anchor="end" fill="var(--text-2)" font-size="10" font-family="var(--mono)">${hFmtVal(v)}</text>`;
   }
   for (let i = 0; i < hours.length; i++) {
     if (i % 2 === 0 || hours.length <= 12) {
@@ -4623,7 +4690,7 @@ function renderHourly(R) {
 
   html += `<div class="h-section-head">
     <span class="num">01</span>
-    <span class="title">Hour Profile</span>
+    <span class="title">Hour Profile — ${hMetric === 'tcs' ? 'Συναλλαγές (TCs)' : 'Πωλήσεις (€)'}</span>
     <span class="meta">CY ${cyYear} ${lyYear ? '· vs LY ' + lyYear : ''}</span>
   </div>
   <div class="chart-card">${svg}</div>`;
@@ -4642,7 +4709,7 @@ function renderHourly(R) {
     html += `<div class="tz-card" style="--tz-color: ${t.color}">
       <div class="tz-range">${t.range}</div>
       <div class="tz-label">${t.label}</div>
-      <div class="tz-value">${fmtEurK(t.sales)}</div>
+      <div class="tz-value">${hFmtVal(t.sales)}</div>
       <div class="tz-share">${(share*100).toFixed(1).replace('.',',')}% του συνόλου</div>
       <div class="tz-bar"><div style="width:${(share*100).toFixed(1)}%"></div></div>
     </div>`;
@@ -4718,7 +4785,7 @@ function renderHourly(R) {
 
   html += `<div class="h-section-head">
     <span class="num">04</span>
-    <span class="title">Heatmap · Store × Hour</span>
+    <span class="title">Heatmap · Store × Hour — ${hMetric === 'tcs' ? 'TCs' : '€'}</span>
     <span class="meta">${cyYear} · ${stores.length} stores · σύρε δεξιά</span>
   </div>
   ${heatHTML}`;
@@ -4794,10 +4861,10 @@ function renderHourly(R) {
       const segPct = total > 0 ? (v / total) * 100 : 0;
       const ch = CHANNELS[ci];
       const color = CHANNEL_COLORS[ch] || '#6b7689';
-      html += `<div class="stack-seg" style="width: ${segPct.toFixed(2)}%; background: ${color};" title="${ch} · ${(segPct).toFixed(1).replace('.',',')}% · ${fmtEurK(v)}"></div>`;
+      html += `<div class="stack-seg" style="width: ${segPct.toFixed(2)}%; background: ${color};" title="${ch} · ${(segPct).toFixed(1).replace('.',',')}% · ${hFmtVal(v)}"></div>`;
     }
     html += `</div>
-      <div class="stack-total">${fmtEurK(total)}</div>
+      <div class="stack-total">${hFmtVal(total)}</div>
     </div>`;
   });
 
@@ -4833,7 +4900,7 @@ function renderHourly(R) {
         <td>${fmtEur(peakV)}</td>
         <td>${(peakPct*100).toFixed(1).replace('.', ',')}%</td>
         <td>${quietH != null ? String(quietH).padStart(2,'0') + ':00' : '—'}</td>
-        <td>${fmtEurK(totalDay)}</td>
+        <td>${hFmtVal(totalDay)}</td>
       </tr>`;
     }
     peakHtml += `</tbody></table>`;
@@ -4859,7 +4926,7 @@ function renderHourly(R) {
         <div class="card-rows">
           <div class="card-row"><span class="lbl">Peak Sales</span><span class="val">${fmtEur(peakV)}</span></div>
           <div class="card-row"><span class="lbl">% of Day</span><span class="val">${(peakPct*100).toFixed(1).replace('.', ',')}%</span></div>
-          <div class="card-row"><span class="lbl">Total Day</span><span class="val">${fmtEurK(totalDay)}</span></div>
+          <div class="card-row"><span class="lbl">Total Day</span><span class="val">${hFmtVal(totalDay)}</span></div>
         </div></div>`;
     }
     peakHtml += `</div>`;
@@ -4961,7 +5028,7 @@ function renderHourly(R) {
                   <td style="text-align:left"><strong>${r.name.replace(/^(KFC|TB)\s*-?\s*/, '')}</strong></td>
                   ${r.cells.map(c => `<td style="${cellColor(c.splh)}" title="${c.h}:00 — ${Math.round(c.S)}€ / ${c.L.toFixed(1)}h">${fmtSplh(c.splh)}</td>`).join('')}
                   <td>${Math.round(r.totLab)}</td>
-                  <td>${fmtEurK(r.totSal)}</td>
+                  <td>${hFmtVal(r.totSal)}</td>
                   <td><strong>${fmtSplh(r.totSplh)}€</strong></td>
                 </tr>`).join('')}
                 </tbody>
@@ -4981,6 +5048,212 @@ function renderHourly(R) {
 // MAIN DISPATCH
 // =====================================================================
 let _cachedR = null;
+// =====================================================================
+// WEEKLY vs LY — ISO week-by-week per store
+// =====================================================================
+function isoWeekMonday(isoYear, w) {
+  const jan4 = new Date(Date.UTC(isoYear, 0, 4));
+  const dow = (jan4.getUTCDay() + 6) % 7;
+  const mon1 = new Date(jan4); mon1.setUTCDate(jan4.getUTCDate() - dow);
+  const mon = new Date(mon1); mon.setUTCDate(mon1.getUTCDate() + (w - 1) * 7);
+  return mon.toISOString().slice(0, 10);
+}
+function _wAddDays(ds, n) {
+  const d = new Date(ds + 'T12:00:00Z');
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+
+function renderWeekly(R) {
+  const root = document.getElementById('tab-weekly');
+  const fmtK = v => v >= 1e6 ? (v / 1e6).toFixed(2).replace('.', ',') + 'M€' : Math.round(v / 1e3) + 'K€';
+  const sf = R.storeFilter;
+  const met = STATE.weeklyMetric || 'sales';
+  const rangeN = STATE.weeklyRange != null ? STATE.weeklyRange : 13;
+
+  const isoCur = getISOWeek(LATEST);
+  const curIsoYear = isoCur[0], curIsoWeek = isoCur[1];
+  const lyIsoYear = curIsoYear - 1;
+  const curMon = isoWeekMonday(curIsoYear, curIsoWeek);
+  const daysIntoWeek = Math.round((new Date(LATEST + 'T12:00:00Z') - new Date(curMon + 'T12:00:00Z')) / 86400000) + 1;
+
+  const firstW = rangeN > 0 ? Math.max(1, curIsoWeek - rangeN + 1) : 1;
+  const weeks = [];
+  for (let w = firstW; w <= curIsoWeek; w++) weeks.push(w);
+
+  function weekAgg(isoYear, w, clipDays) {
+    const mon = isoWeekMonday(isoYear, w);
+    const per = STORES.map(() => ({ s: 0, t: 0 }));
+    const nDays = clipDays || 7;
+    for (let d = 0; d < nDays; d++) {
+      const a = dailyStore.get(_wAddDays(mon, d));
+      if (!a) continue;
+      for (let si = 0; si < STORES.length; si++) {
+        if (sf && !sf.has(si)) continue;
+        per[si].s += a[si].sales; per[si].t += a[si].tcs;
+      }
+    }
+    return per;
+  }
+  const cyW = {}, lyW = {};
+  weeks.forEach(w => {
+    const clip = (w === curIsoWeek) ? daysIntoWeek : 7;
+    cyW[w] = weekAgg(curIsoYear, w, clip);
+    lyW[w] = weekAgg(lyIsoYear, w, clip);
+  });
+
+  const mval = (o) => met === 'tcs' ? o.t : (met === 'avg' ? (o.t > 0 ? o.s / o.t : null) : o.s);
+  const mfmt = (v) => v == null ? '—' : (met === 'tcs' ? fmtNum(v) : (met === 'avg' ? fmtAvg(v) : fmtK(v)));
+
+  const rows = [];
+  for (let si = 0; si < STORES.length; si++) {
+    if (sf && !sf.has(si)) continue;
+    let totS = 0, totT = 0, lyS = 0, lyT = 0, any = false;
+    const cells = weeks.map(w => {
+      const cy = cyW[w][si], ly = lyW[w][si];
+      if (cy.s > 0 || ly.s > 0) any = true;
+      totS += cy.s; totT += cy.t; lyS += ly.s; lyT += ly.t;
+      const cv = mval(cy), lv = mval(ly);
+      const yoy = (cv != null && lv != null && lv > 0 && cv > 0) ? cv / lv - 1 : null;
+      return { w, cv, lv, yoy, cyS: cy.s, cyT: cy.t, lyS: ly.s, lyT: ly.t };
+    });
+    if (!any) continue;
+    const totCv = met === 'tcs' ? totT : (met === 'avg' ? (totT > 0 ? totS / totT : null) : totS);
+    const totLv = met === 'tcs' ? lyT : (met === 'avg' ? (lyT > 0 ? lyS / lyT : null) : lyS);
+    const totYoy = (totCv != null && totLv != null && totLv > 0) ? totCv / totLv - 1 : null;
+    rows.push({ si, short: STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si], cells, totCv, totYoy, sortKey: totS });
+  }
+  rows.sort((a, b) => b.sortKey - a.sortKey);
+
+  const chainCells = weeks.map(w => {
+    let cs = 0, ct = 0, ls = 0, lt = 0;
+    for (let si = 0; si < STORES.length; si++) {
+      if (sf && !sf.has(si)) continue;
+      cs += cyW[w][si].s; ct += cyW[w][si].t; ls += lyW[w][si].s; lt += lyW[w][si].t;
+    }
+    const cv = met === 'tcs' ? ct : (met === 'avg' ? (ct > 0 ? cs / ct : null) : cs);
+    const lv = met === 'tcs' ? lt : (met === 'avg' ? (lt > 0 ? ls / lt : null) : ls);
+    return { w, cv, lv, yoy: (cv != null && lv != null && lv > 0 && cv > 0) ? cv / lv - 1 : null, cs, ct, ls, lt };
+  });
+
+  const fullWeeks = weeks.filter(w => w !== curIsoWeek);
+  const rec4 = fullWeeks.slice(-4);
+  const prev4 = fullWeeks.slice(-8, -4);
+  function storeYoY(si, ws) {
+    let cs = 0, ls = 0;
+    ws.forEach(w => { cs += cyW[w][si].s; ls += lyW[w][si].s; });
+    return ls > 0 ? cs / ls - 1 : null;
+  }
+  const insights = [];
+  {
+    let cs = 0, ls = 0, ct = 0, lt = 0;
+    chainCells.forEach(cc => { cs += cc.cs; ls += cc.ls; ct += cc.ct; lt += cc.lt; });
+    if (ls > 0) insights.push('Αλυσίδα (' + weeks.length + ' εβδ): πωλήσεις ' + fmtPct(cs / ls - 1) + ' vs LY · TCs ' + (lt > 0 ? fmtPct(ct / lt - 1) : '—') + ' · ticket ' + ((ct > 0 && lt > 0) ? fmtPct((cs / ct) / (ls / lt) - 1) : '—'));
+    const perf = rows.map(r => ({ short: r.short, y: storeYoY(r.si, fullWeeks) })).filter(x => x.y != null);
+    if (perf.length >= 2) {
+      const best = perf.reduce((a, b) => b.y > a.y ? b : a);
+      const worst = perf.reduce((a, b) => b.y < a.y ? b : a);
+      insights.push('Καλύτερο vs LY: <strong>' + best.short + '</strong> ' + fmtPct(best.y) + ' · Αδύναμο: <strong>' + worst.short + '</strong> ' + fmtPct(worst.y));
+    }
+    if (rec4.length === 4 && prev4.length === 4) {
+      const mom = rows.map(r => {
+        const a = storeYoY(r.si, prev4), b = storeYoY(r.si, rec4);
+        return (a != null && b != null) ? { short: r.short, d: b - a } : null;
+      }).filter(Boolean).sort((x, y) => y.d - x.d);
+      if (mom.length >= 2) {
+        const up = mom[0], down = mom[mom.length - 1];
+        if (up.d > 0.02) insights.push('Ανακάμπτει: <strong>' + up.short + '</strong> (' + fmtPct(up.d) + ' βελτίωση YoY στις τελευταίες 4 εβδ)');
+        if (down.d < -0.02) insights.push('Χάνει momentum: <strong>' + down.short + '</strong> (' + fmtPct(down.d) + ' επιδείνωση YoY)');
+      }
+    }
+  }
+
+  let html = '<div class="trend-metric-bar">' +
+    '<span class="tm-label">ΜΕΤΡΙΚΗ</span>' +
+    '<button class="trend-metric-chip ' + (met === 'sales' ? 'active' : '') + '" onclick="window.setWeeklyMetric(\'sales\')">Πωλήσεις (€)</button>' +
+    '<button class="trend-metric-chip ' + (met === 'tcs' ? 'active' : '') + '" onclick="window.setWeeklyMetric(\'tcs\')">Συναλλαγές</button>' +
+    '<button class="trend-metric-chip ' + (met === 'avg' ? 'active' : '') + '" onclick="window.setWeeklyMetric(\'avg\')">Μέσο Ticket</button>' +
+    '<span class="tm-label" style="margin-left:14px">ΕΒΔΟΜΑΔΕΣ</span>' +
+    '<button class="trend-metric-chip ' + (rangeN === 8 ? 'active' : '') + '" onclick="window.setWeeklyRange(8)">8</button>' +
+    '<button class="trend-metric-chip ' + (rangeN === 13 ? 'active' : '') + '" onclick="window.setWeeklyRange(13)">13</button>' +
+    '<button class="trend-metric-chip ' + (rangeN === 0 ? 'active' : '') + '" onclick="window.setWeeklyRange(0)">Όλες (W1→)</button>' +
+    '</div>';
+
+  if (insights.length) {
+    html += '<div class="panel-section"><div class="section-title"><span>Key Takeaways</span><span class="meta">αυτόματα · πλήρεις εβδομάδες</span></div>' +
+      insights.map(t => '<div class="insight" style="margin-bottom:6px"><div class="ins-text">' + t + '</div></div>').join('') + '</div>';
+  }
+
+  const yoyTag = (y) => y == null ? '<div style="font-size:8px;color:var(--text-2)">—</div>'
+    : '<div style="font-size:9px;font-weight:700;color:' + (y >= 0 ? 'var(--good)' : 'var(--bad)') + '">' + (y >= 0 ? '+' : '') + (y * 100).toFixed(1).replace('.', ',') + '%</div>';
+  const cellBg = (y) => y == null ? '' : 'background:' + (y >= 0 ? 'rgba(34,197,94,0.10)' : (y < -0.05 ? 'rgba(239,68,68,0.13)' : 'rgba(245,158,11,0.10)'));
+  const cellTitle = (cl) => 'W' + cl.w + ' — CY: ' + Math.round(cl.cyS).toLocaleString('el-GR') + '€ / ' + cl.cyT + ' TCs · LY: ' + Math.round(cl.lyS).toLocaleString('el-GR') + '€ / ' + cl.lyT + ' TCs';
+
+  let chainTotYoy = null, chainTotCv = null;
+  {
+    let cs = 0, ls = 0, ct = 0, lt = 0;
+    chainCells.forEach(cc => { cs += cc.cs; ls += cc.ls; ct += cc.ct; lt += cc.lt; });
+    chainTotCv = met === 'tcs' ? ct : met === 'avg' ? (ct > 0 ? cs / ct : null) : cs;
+    const lv = met === 'tcs' ? lt : met === 'avg' ? (lt > 0 ? ls / lt : null) : ls;
+    chainTotYoy = (chainTotCv != null && lv != null && lv > 0) ? chainTotCv / lv - 1 : null;
+  }
+
+  html += '<div class="panel-section">' +
+    '<div class="section-title"><span>Store × Εβδομάδα vs LY — ' + (met === 'tcs' ? 'Συναλλαγές' : met === 'avg' ? 'Μέσο Ticket' : 'Πωλήσεις') + '</span>' +
+    '<span class="meta">ISO εβδομάδες ' + curIsoYear + ' vs ' + lyIsoYear + ' · W' + firstW + '–W' + curIsoWeek + '</span></div>' +
+    '<div style="overflow-x:auto"><table class="desktop-table" style="font-size:10px">' +
+    '<thead><tr><th style="text-align:left;position:sticky;left:0;background:var(--bg-2);z-index:2">Store</th><th>Σύνολο</th>' +
+    weeks.map(w => '<th>W' + w + (w === curIsoWeek ? '<br><span style="font-size:8px;font-weight:400">(' + daysIntoWeek + 'ημ)</span>' : '') + '</th>').join('') +
+    '</tr></thead><tbody>' +
+    '<tr class="row-grand"><td style="text-align:left;position:sticky;left:0;background:var(--bg-2);z-index:2"><strong>ΑΛΥΣΙΔΑ</strong></td>' +
+    '<td><strong>' + mfmt(chainTotCv) + '</strong>' + yoyTag(chainTotYoy) + '</td>' +
+    chainCells.map(cc => '<td title="W' + cc.w + ' — CY: ' + Math.round(cc.cs).toLocaleString('el-GR') + '€ · LY: ' + Math.round(cc.ls).toLocaleString('el-GR') + '€"><strong>' + mfmt(cc.cv) + '</strong>' + yoyTag(cc.yoy) + '</td>').join('') +
+    '</tr>' +
+    rows.map(r => '<tr><td style="text-align:left;position:sticky;left:0;background:var(--bg-1);z-index:1"><strong>' + r.short + '</strong></td>' +
+      '<td>' + mfmt(r.totCv) + yoyTag(r.totYoy) + '</td>' +
+      r.cells.map(cl => '<td title="' + cellTitle(cl) + '" style="' + cellBg(cl.yoy) + '">' + mfmt(cl.cv) + yoyTag(cl.yoy) + '</td>').join('') +
+      '</tr>').join('') +
+    '</tbody></table></div>' +
+    '<div style="font-size:10px;color:var(--text-2);font-family:var(--mono);padding-top:6px">LY = ίδια ISO εβδομάδα ' + lyIsoYear + ' (ίδιες μέρες εβδομάδας — καμία μερική W1). Η τρέχουσα W' + curIsoWeek + ' συγκρίνεται με τις ίδιες ' + daysIntoWeek + ' μέρες πέρσι. Χρώμα: πράσινο ≥ LY · κίτρινο έως −5% · κόκκινο κάτω.</div>' +
+    '</div>';
+
+  // Chain weekly line chart CY vs LY
+  {
+    const labels = weeks.map(w => 'W' + w);
+    const cyVals = chainCells.map(cc => cc.cv);
+    const lyVals = chainCells.map(cc => cc.lv);
+    const vals = cyVals.concat(lyVals).filter(v => v != null && v > 0);
+    if (vals.length > 3) {
+      const W = 700, H = 220, P = { l: 55, r: 12, t: 14, b: 26 };
+      const iW = W - P.l - P.r, iH = H - P.t - P.b;
+      const mn = Math.min.apply(null, vals), mx = Math.max.apply(null, vals), rg = (mx - mn) || 1;
+      const yMin = Math.max(0, mn - rg * 0.1), yMax = mx + rg * 0.1;
+      const xs = i => P.l + i / Math.max(1, labels.length - 1) * iW;
+      const ys = v => P.t + iH - (v - yMin) / (yMax - yMin) * iH;
+      const fmtY = v => met === 'tcs' ? fmtNum(v) : met === 'avg' ? fmtAvg(v) : fmtK(v);
+      let svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+      for (let g = 0; g <= 4; g++) {
+        const y = P.t + iH * g / 4, v = yMax - (yMax - yMin) * g / 4;
+        svg += '<line x1="' + P.l + '" y1="' + y + '" x2="' + (W - P.r) + '" y2="' + y + '" stroke="var(--border-soft)"/><text x="' + (P.l - 5) + '" y="' + (y + 3) + '" text-anchor="end" fill="var(--text-2)" font-size="9" font-family="var(--mono)">' + fmtY(v) + '</text>';
+      }
+      const st = Math.max(1, Math.ceil(labels.length / 14));
+      labels.forEach((lb, i) => { if (i % st === 0 || i === labels.length - 1) svg += '<text x="' + xs(i) + '" y="' + (H - 7) + '" text-anchor="middle" fill="var(--text-2)" font-size="9" font-family="var(--mono)">' + lb + '</text>'; });
+      [{ n: 'CY ' + curIsoYear, v: cyVals, col: '#ef4444', wd: 2.4, dash: '' }, { n: 'LY ' + lyIsoYear, v: lyVals, col: '#f59e0b', wd: 1.8, dash: '5 3' }].forEach(sr => {
+        let d = '', up = true;
+        sr.v.forEach((v, i) => { if (v == null || v <= 0) { up = true; return; } d += (up ? 'M' : 'L') + xs(i) + ',' + ys(v) + ' '; up = false; });
+        svg += '<path fill="none" stroke="' + sr.col + '" stroke-width="' + sr.wd + '" stroke-dasharray="' + sr.dash + '" d="' + d.trim() + '"/>';
+        sr.v.forEach((v, i) => { if (v == null || v <= 0) return; svg += '<g><circle cx="' + xs(i) + '" cy="' + ys(v) + '" r="2.3" fill="' + sr.col + '"/><title>' + sr.n + ' ' + labels[i] + ': ' + fmtY(v) + '</title></g>'; });
+      });
+      svg += '<rect x="' + (P.l + 8) + '" y="' + P.t + '" width="14" height="3" fill="#ef4444"/><text x="' + (P.l + 26) + '" y="' + (P.t + 5) + '" fill="var(--text-1)" font-size="10">CY ' + curIsoYear + '</text>';
+      svg += '<rect x="' + (P.l + 100) + '" y="' + P.t + '" width="14" height="3" fill="#f59e0b"/><text x="' + (P.l + 118) + '" y="' + (P.t + 5) + '" fill="var(--text-1)" font-size="10">LY ' + lyIsoYear + '</text>';
+      svg += '</svg>';
+      html += '<div class="panel-section"><div class="section-title"><span>Αλυσίδα — εβδομαδιαία εξέλιξη</span><span class="meta">CY vs LY (ISO)</span></div><div class="chart-wrap">' + svg + '</div></div>';
+    }
+  }
+
+  root.innerHTML = html;
+}
+
 // =====================================================================
 // FORECAST TAB — Projected vs Budget vs LY, down to the HOUR
 // Methodology:
@@ -5178,6 +5451,9 @@ const FC_DOW_GR = ['Κυρ', 'Δευ', 'Τρι', 'Τετ', 'Πεμ', 'Παρ', '
 
 window.setFcMonth = function(m) { STATE.fcMonth = m; renderActive(); };
 window.setFcMetric = function(m) { STATE.fcMetric = m; renderActive(); };
+window.setHourlyMetric = function(m) { STATE.hourlyMetric = m; renderActive(); };
+window.setWeeklyMetric = function(m) { STATE.weeklyMetric = m; renderActive(); };
+window.setWeeklyRange = function(n) { STATE.weeklyRange = n; renderActive(); };
 window.setFcDay = function(d) { STATE.fcDay = d; renderActive(); };
 window.setFcStore = function(v) { STATE.fcStore = v; renderActive(); };
 
@@ -5612,6 +5888,7 @@ function renderActive() {
     channels: renderChannels, rankings: renderRankings, dow: renderDOW,
     trend: renderTrend, storedeep: renderStoreDeep, hourly: renderHourly,
     insights: renderInsights, multiyear: renderMultiyear, forecast: renderForecast,
+    weekly: renderWeekly,
   };
   map[STATE.activeTab](R);
   _injectTableExportButtons();
