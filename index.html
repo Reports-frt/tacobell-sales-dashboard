@@ -2709,6 +2709,14 @@ const STATE = {
   hourlyMetric: "sales",  // Hourly tab: sales | tcs (tcs μόνο όταν HAS_HOURLY_TCS)
   weeklyMetric: "sales",  // Weekly tab: sales | tcs | avg
   weeklyRange: 13,        // Weekly tab: 8 | 13 | 0 (0 = όλες)
+  weeklyChannels: [],     // Weekly tab: channel idx filter ([] = όλα)
+  weeklyType: null,       // Weekly tab: store type filter
+  weeklySSS: false,       // Weekly tab: same-store only
+  weeklyView: "val",      // Weekly tab: val | heat
+  weeklyDrill: null,      // Weekly tab: 'si:w' expanded cell
+  aggCommission: 25,      // Channels tab: aggregator commission % for cost estimate
+  weeklySummary: true,    // Weekly tab: show narrative summary (default on)
+  reviewMode: "year",     // Insights: year | month in review
   fcDay: null,            // Forecast tab: selected day for hourly view (null = tomorrow auto)
   fcStore: 'ALL',         // Forecast tab hourly: 'ALL' or store index
   storeType: "all",       // all | "In Line" | "Mall Food Court" | etc
@@ -3165,6 +3173,59 @@ function renderOverview(R) {
   }
   html += `</div></div>`;
 
+
+  // ============ 🎯 BUDGET PACE — τρέχων μήνας (τι χρειάζεσαι για τον στόχο) ============
+  try {
+    const yNow = +LATEST.slice(0, 4), mNow = +LATEST.slice(5, 7);
+    const dim = new Date(yNow, mNow, 0).getDate();
+    const mtdDays = +LATEST.slice(8, 10);
+    const remDays = dim - mtdDays;
+    const paceRows = [];
+    let chMtd = 0, chMtdBud = 0, chMonthBud = 0;
+    for (let si = 0; si < STORES.length; si++) {
+      if (R.storeFilter && !R.storeFilter.has(si)) continue;
+      let mtd = 0, mtdBud = 0, monthBud = 0;
+      for (let d = 1; d <= dim; d++) {
+        const ds = yNow + '-' + String(mNow).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        const b = getDayBudget(ds, si, STATE.ly_mode || '364');
+        monthBud += b.sales;
+        if (d <= mtdDays) {
+          mtdBud += b.sales;
+          const a = dailyStore.get(ds);
+          if (a) mtd += a[si].sales;
+        }
+      }
+      if (monthBud <= 0) continue;
+      chMtd += mtd; chMtdBud += mtdBud; chMonthBud += monthBud;
+      paceRows.push({
+        short: STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si],
+        mtd, monthBud,
+        curRate: mtdDays > 0 ? mtd / mtdDays : 0,
+        reqRate: remDays > 0 ? Math.max(0, monthBud - mtd) / remDays : 0,
+        pace: mtdBud > 0 ? mtd / mtdBud : null,
+      });
+    }
+    if (paceRows.length) {
+      paceRows.sort((a, b) => (a.pace ?? 9) - (b.pace ?? 9));
+      const stIcon = p => p == null ? '—' : p >= 1 ? '✅' : p >= 0.95 ? '⚠️' : '🔴';
+      const monthName = ['','Ιανουαρίου','Φεβρουαρίου','Μαρτίου','Απριλίου','Μαΐου','Ιουνίου','Ιουλίου','Αυγούστου','Σεπτεμβρίου','Οκτωβρίου','Νοεμβρίου','Δεκεμβρίου'][mNow];
+      const chPace = chMtdBud > 0 ? chMtd / chMtdBud : null;
+      const chReq = remDays > 0 ? Math.max(0, chMonthBud - chMtd) / remDays : 0;
+      html += '<div class="panel-section">' +
+        '<div class="section-title"><span>🎯 Budget Pace — ' + monthName + '</span><span class="meta">MTD έως ' + LATEST + ' · στόχος MTD = DOW-adjusted · απομένουν ' + remDays + ' ημέρες</span></div>' +
+        '<div class="insight" style="margin-bottom:10px"><div class="ins-text"><strong>ΑΛΥΣΙΔΑ ' + stIcon(chPace) + '</strong>: MTD ' + fmtEurK(chMtd) + ' (' + (chPace != null ? Math.round(chPace * 100) + '% του στόχου MTD' : '—') + '). Για τον μηνιαίο στόχο ' + fmtEurK(chMonthBud) + ' χρειάζεται <strong>' + fmtEurK(chReq) + '/μέρα</strong> τις υπόλοιπες ' + remDays + ' (τρέχει με ' + fmtEurK(mtdDays > 0 ? chMtd / mtdDays : 0) + '/μέρα).</div></div>' +
+        '<div class="desktop-only"><div style="overflow-x:auto"><table class="desktop-table" style="font-size:10px"><thead><tr>' +
+        '<th style="text-align:left">Store</th><th></th><th>MTD</th><th>Στόχος MTD</th><th>Pace</th><th>€/μέρα τώρα</th><th>€/μέρα απαιτ.</th><th>Στόχος μήνα</th></tr></thead><tbody>' +
+        paceRows.map(r => '<tr><td style="text-align:left"><strong>' + r.short + '</strong></td><td>' + stIcon(r.pace) + '</td>' +
+          '<td>' + fmtEurK(r.mtd) + '</td><td>' + fmtEurK(r.mtd / (r.pace || 1)) + '</td>' +
+          '<td style="font-weight:700;color:' + (r.pace == null ? 'var(--text-2)' : r.pace >= 1 ? 'var(--good)' : r.pace >= 0.95 ? 'var(--warn)' : 'var(--bad)') + '">' + (r.pace != null ? Math.round(r.pace * 100) + '%' : '—') + '</td>' +
+          '<td>' + fmtEurK(r.curRate) + '</td><td><strong>' + fmtEurK(r.reqRate) + '</strong>' + (r.reqRate > r.curRate * 1.15 ? ' 📈' : '') + '</td>' +
+          '<td>' + fmtEurK(r.monthBud) + '</td></tr>').join('') +
+        '</tbody></table></div></div>' +
+        '<div style="font-size:10px;color:var(--text-2);font-family:var(--mono);padding-top:6px">Pace = MTD πωλήσεις ÷ DOW-adjusted στόχο MTD. 📈 = ο απαιτούμενος ρυθμός είναι >15% πάνω από τον τρέχοντα.</div></div>';
+    }
+  } catch (e) { /* pace is additive */ }
+
   root.innerHTML = html;
 
   // Hook up channel view chips
@@ -3502,6 +3563,63 @@ function renderChannels(R) {
     html += `</div>`;
   });
 
+
+  // ============ 🛵 AGGREGATOR DEPENDENCY (E-FOOD / WOLT / BOX) ============
+  try {
+    const aggIdx = new Set();
+    CHANNELS.forEach((n, ci) => { if (/E-?\s*FOOD|WOLT|BOX/i.test(n)) aggIdx.add(ci); });
+    if (aggIdx.size) {
+      const comm = STATE.aggCommission != null ? STATE.aggCommission : 25;
+      const per = STORES.map(() => ({ agg: 0, tot: 0 }));
+      REC_CH.forEach(r => {
+        if (r[0] < R.from || r[0] > R.to) return;
+        if (R.storeFilter && !R.storeFilter.has(r[1])) return;
+        per[r[1]].tot += r[3];
+        if (aggIdx.has(r[2])) per[r[1]].agg += r[3];
+      });
+      // Τάση: last 4 full ISO weeks vs prev 4 (chain-wide, ανεξάρτητα period)
+      const isoNow = getISOWeek(LATEST);
+      const w0 = isoNow[1] - (isoNow[1] === getISOWeek(LATEST)[1] ? 1 : 0);
+      function aggShare(wFrom, wTo) {
+        let a = 0, t = 0;
+        const dset = new Set();
+        for (let w = wFrom; w <= wTo; w++) {
+          const mon = isoWeekMonday(isoNow[0], w);
+          for (let d = 0; d < 7; d++) dset.add(_wAddDays(mon, d));
+        }
+        REC_CH.forEach(r => {
+          if (!dset.has(r[0])) return;
+          if (R.storeFilter && !R.storeFilter.has(r[1])) return;
+          t += r[3]; if (aggIdx.has(r[2])) a += r[3];
+        });
+        return t > 0 ? a / t : null;
+      }
+      const shNow = aggShare(w0 - 3, w0), shPrev = aggShare(w0 - 7, w0 - 4);
+      const rows2 = per.map((p, si) => ({
+        si, short: STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si],
+        agg: p.agg, tot: p.tot, share: p.tot > 0 ? p.agg / p.tot : null,
+      })).filter(r => r.tot > 0 && r.share != null).sort((a, b) => b.share - a.share);
+      if (rows2.length) {
+        let chA = 0, chT = 0;
+        rows2.forEach(r => { chA += r.agg; chT += r.tot; });
+        const trend = (shNow != null && shPrev != null) ? (shNow - shPrev) * 100 : null;
+        html += '<div class="panel-section">' +
+          '<div class="section-title"><span>🛵 Εξάρτηση από Aggregators</span><span class="meta">E-FOOD / WOLT / BOX · ' + R.from + ' → ' + R.to + '</span></div>' +
+          '<div class="insight" style="margin-bottom:10px"><div class="ins-text">Αλυσίδα: <strong>' + (chT > 0 ? (chA / chT * 100).toFixed(1).replace('.', ',') : '—') + '%</strong> του τζίρου μέσω aggregators' +
+          (trend != null ? ' · τάση 4εβδ: <strong>' + (trend >= 0 ? '+' : '') + trend.toFixed(1).replace('.', ',') + 'μ</strong>' + (trend > 0.5 ? ' 📈 αυξάνεται' : trend < -0.5 ? ' 📉 μειώνεται' : '') : '') +
+          ' · Εκτ. προμήθειες περιόδου με <input type="number" value="' + comm + '" min="0" max="40" style="width:44px;background:var(--bg-2);color:var(--text-0);border:1px solid var(--border-soft);border-radius:3px;padding:1px 3px;font-size:10px" onchange="window.setAggCommission(+this.value)">%: <strong>' + fmtEurK(chA * comm / 100) + '</strong></div></div>' +
+          '<div class="desktop-only"><div style="overflow-x:auto"><table class="desktop-table" style="font-size:10px"><thead><tr>' +
+          '<th style="text-align:left">Store</th><th>Aggregator €</th><th>Share</th><th>Εκτ. προμήθειες</th><th></th></tr></thead><tbody>' +
+          rows2.map(r => '<tr><td style="text-align:left"><strong>' + r.short + '</strong></td>' +
+            '<td>' + fmtEurK(r.agg) + '</td>' +
+            '<td style="font-weight:700;color:' + (r.share > 0.5 ? 'var(--bad)' : r.share > 0.35 ? 'var(--warn)' : 'var(--good)') + '">' + (r.share * 100).toFixed(1).replace('.', ',') + '%</td>' +
+            '<td>' + fmtEurK(r.agg * comm / 100) + '</td>' +
+            '<td style="font-size:9px">' + (r.share > 0.5 ? '⚠ υψηλή έκθεση' : '') + '</td></tr>').join('') +
+          '</tbody></table></div></div></div>';
+      }
+    }
+  } catch (e) { /* additive */ }
+
   root.innerHTML = html;
   attachSortHandlers(root, () => renderChannels(R));
   // Wire up the View toggle chips (Type / Sales Type / Channels)
@@ -3780,6 +3898,62 @@ function renderRankings(R) {
   html += rankSection("cyS", "Net Sales Ranking", fmtEurK) +
           rankSection("cyT", "Transactions Ranking", fmtNum) +
           rankSection("cyA", "Avg Ticket Ranking", fmtAvg);
+
+
+  // ============ 👥 PEER BENCHMARKING (ομάδες μεγέθους/τύπου) ============
+  try {
+    const peerRows = [];
+    for (let si = 0; si < STORES.length; si++) {
+      if (R.storeFilter && !R.storeFilter.has(si)) continue;
+      const cy = R.cy.byStore[si], ly = R.ly.byStore[si];
+      if (!cy || cy.sales <= 0) continue;
+      peerRows.push({
+        si, short: STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si],
+        type: (typeof wkStoreType === 'function') ? wkStoreType(si) : null,
+        cyS: cy.sales, lyS: ly ? ly.sales : 0,
+        yoy: (ly && ly.sales > 0) ? cy.sales / ly.sales - 1 : null,
+      });
+    }
+    if (peerRows.length >= 6) {
+      const useTypes = peerRows.filter(r => r.type).length >= peerRows.length * 0.8 && new Set(peerRows.map(r => r.type).filter(Boolean)).size >= 2;
+      let groups;
+      if (useTypes) {
+        groups = {};
+        peerRows.forEach(r => { (groups[r.type || 'Άλλο'] = groups[r.type || 'Άλλο'] || []).push(r); });
+      } else {
+        const sorted = [...peerRows].sort((a, b) => b.cyS - a.cyS);
+        const third = Math.ceil(sorted.length / 3);
+        groups = {
+          '🥇 Μεγάλα (top ⅓ τζίρου)': sorted.slice(0, third),
+          '🥈 Μεσαία': sorted.slice(third, third * 2),
+          '🥉 Μικρά': sorted.slice(third * 2),
+        };
+      }
+      let inner = '';
+      Object.entries(groups).forEach(([gName, grp]) => {
+        const withYoY = grp.filter(r => r.yoy != null);
+        if (withYoY.length < 2) return;
+        let gs = 0, gl = 0;
+        withYoY.forEach(r => { gs += r.cyS; gl += r.lyS; });
+        const gAvg = gl > 0 ? gs / gl - 1 : null;
+        inner += '<div style="margin-bottom:14px"><div style="font-size:11px;font-weight:700;margin-bottom:6px">' + gName + ' <span style="font-weight:400;color:var(--text-2)">— μέσο vs LY: ' + (gAvg != null ? fmtPct(gAvg) : '—') + '</span></div>' +
+          '<table class="desktop-table" style="font-size:10px"><thead><tr><th style="text-align:left">Store</th><th>Sales</th><th>vs LY</th><th>vs Ομάδα</th><th></th></tr></thead><tbody>' +
+          withYoY.sort((a, b) => b.yoy - a.yoy).map(r => {
+            const dGrp = (r.yoy != null && gAvg != null) ? r.yoy - gAvg : null;
+            return '<tr><td style="text-align:left"><strong>' + r.short + '</strong></td><td>' + fmtEurK(r.cyS) + '</td>' +
+              '<td>' + pctTag(r.yoy) + '</td>' +
+              '<td style="font-weight:700;color:' + (dGrp == null ? 'var(--text-2)' : dGrp >= 0 ? 'var(--good)' : 'var(--bad)') + '">' + (dGrp != null ? (dGrp >= 0 ? '+' : '') + (dGrp * 100).toFixed(1).replace('.', ',') + 'μ' : '—') + '</td>' +
+              '<td style="font-size:9px">' + (dGrp != null && dGrp < -0.05 ? '⚠ υστερεί έναντι ομοίων' : dGrp != null && dGrp > 0.05 ? '⭐ υπεραποδίδει' : '') + '</td></tr>';
+          }).join('') + '</tbody></table></div>';
+      });
+      if (inner) {
+        html += '<div class="panel-section">' +
+          '<div class="section-title"><span>👥 Peer Benchmarking</span><span class="meta">' + (useTypes ? 'ομάδες ανά τύπο store' : 'ομάδες μεγέθους (τζίρος περιόδου) — θα γίνει ανά τύπο όταν οριστούν τα store types') + ' · ' + R.from + ' → ' + R.to + '</span></div>' +
+          '<div class="insight" style="margin-bottom:10px"><div class="ins-text">Κάθε store συγκρίνεται με το μέσο vs LY της <strong>ομάδας του</strong> — πιο δίκαιο από τη σύγκριση με όλη την αλυσίδα. «+2,0μ» = 2 ποσοστιαίες μονάδες καλύτερα από τους ομοίους του.</div></div>' +
+          inner + '</div>';
+      }
+    }
+  } catch (e) { /* additive */ }
 
   root.innerHTML = html;
 
@@ -4109,7 +4283,78 @@ function renderTrend(R) {
         <div class="chart-title">Cumulative ${mdef.label}</div>
         ${chartSVG(cumSeries, acc2, mdef.fmt)}
       </div>
-    </div>`;
+    </div>
+    ${_calendarHeatmap(R)}`;
+}
+
+// ============ 📅 CALENDAR HEATMAP — μέρα-μέρα vs αναμενόμενο ============
+function _calendarHeatmap(R) {
+  try {
+    // Καθορισμός μηνών στο εύρος (max 4 για ευκρίνεια)
+    const startD = new Date(R.from + 'T12:00:00Z'), endD = new Date(R.to + 'T12:00:00Z');
+    const months = [];
+    let cur = new Date(Date.UTC(startD.getUTCFullYear(), startD.getUTCMonth(), 1));
+    while (cur <= endD && months.length < 4) {
+      months.push({ y: cur.getUTCFullYear(), m: cur.getUTCMonth() });
+      cur.setUTCMonth(cur.getUTCMonth() + 1);
+    }
+    if (!months.length) return '';
+
+    // Σύνολο ανά μέρα (respecting store filter) + expected = same-DOW avg 4 προηγ. εβδομάδων
+    function daySales(ds) {
+      const a = dailyStore.get(ds);
+      if (!a) return null;
+      let s = 0, any = false;
+      for (let si = 0; si < STORES.length; si++) {
+        if (R.storeFilter && !R.storeFilter.has(si)) continue;
+        s += a[si].sales; if (a[si].sales > 0) any = true;
+      }
+      return any ? s : null;
+    }
+    function expected(ds) {
+      let sum = 0, n = 0;
+      for (let k = 1; k <= 4; k++) {
+        const p = new Date(ds + 'T12:00:00Z'); p.setUTCDate(p.getUTCDate() - 7 * k);
+        const v = daySales(p.toISOString().slice(0, 10));
+        if (v != null && v > 0) { sum += v; n++; }
+      }
+      return n >= 2 ? sum / n : null;
+    }
+    const DOW = ['Δε', 'Τρ', 'Τε', 'Πε', 'Πα', 'Σά', 'Κυ'];
+    const MON = ['Ιαν', 'Φεβ', 'Μαρ', 'Απρ', 'Μάι', 'Ιούν', 'Ιούλ', 'Αύγ', 'Σεπ', 'Οκτ', 'Νοέ', 'Δεκ'];
+    const bg = dev => {
+      if (dev == null) return 'var(--bg-2)';
+      const cl = Math.max(-0.3, Math.min(0.3, dev)) / 0.3;
+      if (cl >= 0) return 'rgba(34,197,94,' + (0.12 + cl * 0.5).toFixed(2) + ')';
+      return 'rgba(239,68,68,' + (0.12 + (-cl) * 0.55).toFixed(2) + ')';
+    };
+    let grids = '';
+    months.forEach(mo => {
+      const first = new Date(Date.UTC(mo.y, mo.m, 1));
+      const lead = (first.getUTCDay() + 6) % 7; // Δευτέρα=0
+      const dim = new Date(mo.y, mo.m + 1, 0).getDate();
+      let cells = '';
+      for (let i = 0; i < lead; i++) cells += '<div></div>';
+      for (let d = 1; d <= dim; d++) {
+        const ds = mo.y + '-' + String(mo.m + 1).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+        const act = daySales(ds), exp = expected(ds);
+        const dev = (act != null && exp != null && exp > 0) ? act / exp - 1 : null;
+        const future = ds > LATEST;
+        const hol = holidayName(ds);
+        const title = future ? ds + ' (μελλοντική)' : (act == null ? ds + ' — χωρίς δεδομένα' : ds + ' — ' + fmtEurK(act) + (exp ? ' vs αναμ. ' + fmtEurK(exp) + ' (' + (dev >= 0 ? '+' : '') + (dev * 100).toFixed(0) + '%)' : '') + (hol ? ' 🎉 ' + hol : ''));
+        cells += '<div title="' + title + '" style="aspect-ratio:1;border-radius:4px;background:' + (future ? 'transparent' : bg(dev)) + ';border:1px solid var(--border-soft);display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;' + (future ? 'opacity:0.3' : '') + '">' +
+          '<span style="font-weight:600">' + d + '</span>' + (hol ? '<span style="font-size:7px">🎉</span>' : (dev != null ? '<span style="font-size:7px;color:var(--text-2)">' + (dev >= 0 ? '+' : '') + (dev * 100).toFixed(0) + '</span>' : '')) + '</div>';
+      }
+      grids += '<div style="flex:1;min-width:230px;max-width:320px"><div style="font-size:11px;font-weight:700;margin-bottom:6px;text-align:center">' + MON[mo.m] + ' ' + mo.y + '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:3px">' + DOW.map(x => '<div style="text-align:center;font-size:8px;color:var(--text-2)">' + x + '</div>').join('') + '</div>' +
+        '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:3px">' + cells + '</div></div>';
+    });
+
+    return '<div class="panel-section">' +
+      '<div class="section-title"><span>📅 Ημερολόγιο Θερμότητας</span><span class="meta">κάθε μέρα vs αναμενόμενο (same-DOW μ.ό. 4 εβδ) · 🟢 πάνω · 🔴 κάτω</span></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:18px;justify-content:flex-start">' + grids + '</div>' +
+      '<div style="font-size:10px;color:var(--text-2);font-family:var(--mono);padding-top:8px">Ο αριθμός στο κελί = % απόκλιση από το αναμενόμενο. 🎉 = αργία. Το εύρος περιόδου καθορίζει τους μήνες (έως 4).</div></div>';
+  } catch (e) { return ''; }
 }
 
 // =====================================================================
@@ -4147,6 +4392,96 @@ function renderStoreDeep(R) {
     <span class="control-label">Επιλογή καταστήματος</span>
     <select id="storeSelect">${opts}</select>
   </div>`;
+
+  // ============ 📋 STORE SCORECARD (mini-report — εκτυπώσιμο για τον manager) ============
+  try {
+    const scDESC = [];
+    // 1) Period vs Budget vs LY
+    const scYoY = ly && ly.sales > 0 ? cy.sales / ly.sales - 1 : null;
+    const scBud = b && b.sales > 0 ? cy.sales / b.sales - 1 : null;
+    const scAvgYoY = (ly && ly.tcs > 0 && cy.tcs > 0) ? (cy.sales / cy.tcs) / (ly.sales / ly.tcs) - 1 : null;
+    const scTcYoY = ly && ly.tcs > 0 ? cy.tcs / ly.tcs - 1 : null;
+    // 2) Budget pace (τρέχων μήνας)
+    const yNow = +LATEST.slice(0, 4), mNow = +LATEST.slice(5, 7);
+    const dim = new Date(yNow, mNow, 0).getDate(), mtdDays = +LATEST.slice(8, 10), remDays = dim - mtdDays;
+    let mtd = 0, mtdBud = 0, monthBud = 0;
+    for (let d = 1; d <= dim; d++) {
+      const ds = yNow + '-' + String(mNow).padStart(2, '0') + '-' + String(d).padStart(2, '0');
+      const bd = getDayBudget(ds, si, STATE.ly_mode || '364'); monthBud += bd.sales;
+      if (d <= mtdDays) { mtdBud += bd.sales; const a = dailyStore.get(ds); if (a) mtd += a[si].sales; }
+    }
+    const scPace = mtdBud > 0 ? mtd / mtdBud : null;
+    const scReqRate = remDays > 0 ? Math.max(0, monthBud - mtd) / remDays : 0;
+    // 3) Weekly YoY trend (last 8 ISO weeks) sparkline
+    const isoNow = getISOWeek(LATEST);
+    const spark = [];
+    for (let k = 7; k >= 0; k--) {
+      const w = isoNow[1] - k;
+      if (w < 1) { spark.push(null); continue; }
+      const monCY = isoWeekMonday(isoNow[0], w), monLY = isoWeekMonday(isoNow[0] - 1, w);
+      const isCurW = (k === 0);
+      const nd = isCurW ? (Math.round((new Date(LATEST + 'T12:00:00Z') - new Date(monCY + 'T12:00:00Z')) / 86400000) + 1) : 7;
+      let cs = 0, ls = 0;
+      for (let dd = 0; dd < nd; dd++) {
+        const aC = dailyStore.get(_wAddDays(monCY, dd)), aL = dailyStore.get(_wAddDays(monLY, dd));
+        if (aC) cs += aC[si].sales; if (aL) ls += aL[si].sales;
+      }
+      spark.push(ls > 0 ? cs / ls - 1 : null);
+    }
+    // 4) Best day / week (all-time)
+    let bestDay = null, wkAgg = {};
+    dailyStore.forEach((arr, ds) => {
+      const v = arr[si].sales; if (v <= 0) return;
+      if (!bestDay || v > bestDay.v) bestDay = { ds, v };
+      const iw = getISOWeek(ds), k = iw[0] + '-W' + String(iw[1]).padStart(2, '0');
+      wkAgg[k] = (wkAgg[k] || 0) + v;
+    });
+    let bestWk = null;
+    Object.entries(wkAgg).forEach(([k, v]) => { if (!bestWk || v > bestWk.v) bestWk = { k, v }; });
+    // 5) Aggregator share (period)
+    const aggIdx = new Set(); CHANNELS.forEach((n, ci) => { if (/E-?\s*FOOD|WOLT|BOX/i.test(n)) aggIdx.add(ci); });
+    let aggS = 0, totCh = 0;
+    REC_CH.forEach(r => { if (r[1] !== si || r[0] < R.from || r[0] > R.to) return; totCh += r[3]; if (aggIdx.has(r[2])) aggS += r[3]; });
+    const aggShare = totCh > 0 ? aggS / totCh : null;
+
+    const chip = (label, val, cls) => '<div style="flex:1;min-width:120px;padding:10px 12px;background:var(--bg-2);border-radius:8px;border-left:3px solid ' + cls + '"><div style="font-size:9px;color:var(--text-2);text-transform:uppercase;letter-spacing:1px;font-family:var(--mono)">' + label + '</div><div style="font-size:18px;font-weight:700;margin-top:2px">' + val + '</div></div>';
+    const pc = v => v == null ? '—' : (v >= 0 ? '+' : '') + (v * 100).toFixed(1).replace('.', ',') + '%';
+    const pcColor = v => v == null ? 'var(--neutral)' : v >= 0 ? 'var(--good)' : 'var(--bad)';
+    // sparkline SVG
+    const spVals = spark.filter(v => v != null);
+    let sparkSvg = '';
+    if (spVals.length > 2) {
+      const mn = Math.min(...spVals), mx = Math.max(...spVals), rg = (mx - mn) || 0.01;
+      const w2 = 220, h2 = 40;
+      const pts = spark.map((v, i) => v == null ? null : [8 + i / 7 * (w2 - 16), h2 - 6 - (v - mn) / rg * (h2 - 12)]);
+      let d = '', up = true;
+      pts.forEach(p => { if (!p) { up = true; return; } d += (up ? 'M' : 'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1) + ' '; up = false; });
+      const zeroY = mn < 0 && mx > 0 ? h2 - 6 - (0 - mn) / rg * (h2 - 12) : null;
+      sparkSvg = '<svg viewBox="0 0 ' + w2 + ' ' + h2 + '" style="width:100%;max-width:240px">' +
+        (zeroY != null ? '<line x1="8" y1="' + zeroY.toFixed(1) + '" x2="' + (w2 - 8) + '" y2="' + zeroY.toFixed(1) + '" stroke="var(--border-soft)" stroke-dasharray="2 2"/>' : '') +
+        '<path fill="none" stroke="var(--kfc)" stroke-width="2" d="' + d.trim() + '"/>' +
+        pts.map(p => p ? '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2" fill="var(--kfc)"/>' : '').join('') + '</svg>';
+    }
+
+    html += '<div class="panel-section" id="scorecardCard">' +
+      '<div class="section-title"><span>📋 Scorecard — ' + short + '</span><span class="meta">' + (meta.store_type || '') + (meta.opening_date ? ' · άνοιγμα ' + meta.opening_date : '') + ' · ' + R.from + ' → ' + R.to + '</span></div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px">' +
+      chip('Πωλήσεις vs LY', '<span style="color:' + pcColor(scYoY) + '">' + pc(scYoY) + '</span>', pcColor(scYoY)) +
+      chip('vs Budget', '<span style="color:' + pcColor(scBud) + '">' + pc(scBud) + '</span>', pcColor(scBud)) +
+      chip('Συναλλαγές vs LY', '<span style="color:' + pcColor(scTcYoY) + '">' + pc(scTcYoY) + '</span>', pcColor(scTcYoY)) +
+      chip('Μέσο Ticket vs LY', '<span style="color:' + pcColor(scAvgYoY) + '">' + pc(scAvgYoY) + '</span>', pcColor(scAvgYoY)) +
+      '</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px">' +
+      chip('Pace μήνα', (scPace != null ? Math.round(scPace * 100) + '%' : '—') + ' ' + (scPace == null ? '' : scPace >= 1 ? '✅' : scPace >= 0.95 ? '⚠️' : '🔴'), scPace == null ? 'var(--neutral)' : scPace >= 1 ? 'var(--good)' : scPace >= 0.95 ? 'var(--warn)' : 'var(--bad)') +
+      chip('Χρειάζεται/μέρα', fmtEurK(scReqRate), 'var(--accent)') +
+      chip('Aggregators', aggShare != null ? (aggShare * 100).toFixed(0) + '%' : '—', aggShare != null && aggShare > 0.5 ? 'var(--bad)' : 'var(--good)') +
+      chip('Ρεκόρ μέρας', bestDay ? fmtEurK(bestDay.v) : '—', 'var(--accent-2)') +
+      '</div>' +
+      (sparkSvg ? '<div style="padding:10px 12px;background:var(--bg-2);border-radius:8px;margin-bottom:6px"><div style="font-size:9px;color:var(--text-2);text-transform:uppercase;letter-spacing:1px;font-family:var(--mono);margin-bottom:4px">YoY% τελευταίες 8 εβδομάδες</div>' + sparkSvg + '</div>' : '') +
+      '<div style="font-size:10px;color:var(--text-2);font-family:var(--mono);padding-top:4px">' + (bestDay ? 'Καλύτερη μέρα: ' + bestDay.ds + ' (' + fmtEurK(bestDay.v) + ')' : '') + (bestWk ? ' · Καλύτερη εβδομάδα: ' + bestWk.k + ' (' + fmtEurK(bestWk.v) + ')' : '') + '</div>' +
+      '<button class="trend-metric-chip" style="margin-top:10px" onclick="window.print()">🖨 Εκτύπωση Scorecard</button>' +
+      '</div>';
+  } catch (e) { /* scorecard additive */ }
 
   // Header info: store metadata
   html += `<div class="panel-section">
@@ -5041,6 +5376,58 @@ function renderHourly(R) {
     } catch (e) { /* SPLH is additive — never break the hourly tab */ }
   }
 
+  // ============ 🌙 LATE-NIGHT & ΩΡΑΡΙΟ (00:00-04:00) ============
+  try {
+    if (useDateRange) {
+      const cyAgg = aggregateHourlyForRange(R.from, R.to, R.storeFilter);
+      const lyAgg = aggregateHourlyForRange(lyDate(R.from, '364'), lyDate(R.to, '364'), R.storeFilter);
+      const nDays = Math.max(1, Math.round((new Date(R.to) - new Date(R.from)) / 86400000) + 1);
+      const LATE = [0, 1, 2, 3];
+      const lnRows = [];
+      for (let si = 0; si < STORES.length; si++) {
+        if (R.storeFilter && !R.storeFilter.has(si)) continue;
+        const bh = (cyAgg.byStoreHour && cyAgg.byStoreHour[si]) || {};
+        const bhLY = (lyAgg.byStoreHour && lyAgg.byStoreHour[si]) || {};
+        let late = 0, tot = 0, lateLY = 0;
+        Object.entries(bh).forEach(([h, v]) => { tot += v; if (LATE.includes(+h)) late += v; });
+        Object.entries(bhLY).forEach(([h, v]) => { if (LATE.includes(+h)) lateLY += v; });
+        if (tot <= 0) continue;
+        // Τελευταία ώρα λειτουργίας (η "βαθύτερη" ώρα με ουσιαστικές πωλήσεις)
+        const order = h => h < 6 ? h + 24 : h;
+        const activeHours = Object.keys(bh).map(Number).filter(h => bh[h] / nDays > 5).sort((a, b) => order(a) - order(b));
+        const lastH = activeHours.length ? activeHours[activeHours.length - 1] : null;
+        const lastHRate = lastH != null ? bh[lastH] / nDays : null;
+        // Peak shift CY vs LY
+        const peak = obj => { let bh2 = null, bv = -1; Object.entries(obj).forEach(([h, v]) => { if (v > bv) { bv = v; bh2 = +h; } }); return bh2; };
+        const pCY = peak(bh), pLY = Object.keys(bhLY).length ? peak(bhLY) : null;
+        lnRows.push({
+          short: STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si],
+          late, share: late / tot, perDay: late / nDays,
+          lateYoY: lateLY > 0 ? late / lateLY - 1 : null,
+          lastH, lastHRate, pCY, pLY,
+        });
+      }
+      if (lnRows.length) {
+        lnRows.sort((a, b) => b.late - a.late);
+        const totLate = lnRows.reduce((a, r) => a + r.late, 0);
+        html += '<div class="panel-section">' +
+          '<div class="section-title"><span>🌙 Late-Night &amp; Ωράριο</span><span class="meta">ώρες 00:00-04:00 · ' + R.from + ' → ' + R.to + '</span></div>' +
+          '<div class="insight" style="margin-bottom:10px"><div class="ins-text">Σύνολο late-night: <strong>' + hFmtVal(totLate) + '</strong> (' + fmtEurK(totLate / nDays) + '/μέρα). 💸 = η τελευταία ώρα αποφέρει &lt;60€/μέρα κατά μέσο όρο — υποψήφια για νωρίτερο κλείσιμο. Peak shift = η ώρα αιχμής άλλαξε από πέρσι.</div></div>' +
+          '<div class="desktop-only"><div style="overflow-x:auto"><table class="desktop-table" style="font-size:10px"><thead><tr>' +
+          '<th style="text-align:left">Store</th><th>Late-night</th><th>% τζίρου</th><th>€/μέρα (00-04)</th><th>vs LY</th><th>Τελ. ώρα</th><th>€/μέρα τελ. ώρας</th><th>Peak CY→LY</th></tr></thead><tbody>' +
+          lnRows.map(r => '<tr><td style="text-align:left"><strong>' + r.short + '</strong></td>' +
+            '<td>' + hFmtVal(r.late) + '</td>' +
+            '<td>' + (r.share * 100).toFixed(1).replace('.', ',') + '%</td>' +
+            '<td>' + Math.round(r.perDay) + '€</td>' +
+            '<td>' + pctTag(r.lateYoY) + '</td>' +
+            '<td>' + (r.lastH != null ? String(r.lastH).padStart(2, '0') + ':00' : '—') + '</td>' +
+            '<td>' + (r.lastHRate != null ? Math.round(r.lastHRate) + '€' + (r.lastHRate < 60 ? ' 💸' : '') : '—') + '</td>' +
+            '<td>' + (r.pLY != null && r.pCY !== r.pLY ? '<strong>' + r.pLY + ':00→' + r.pCY + ':00</strong> ↔' : (r.pCY != null ? r.pCY + ':00' : '—')) + '</td></tr>').join('') +
+          '</tbody></table></div></div></div>';
+      }
+    }
+  } catch (e) { /* additive */ }
+
   root.innerHTML = html;
 }
 
@@ -5064,32 +5451,87 @@ function _wAddDays(ds, n) {
   return d.toISOString().slice(0, 10);
 }
 
+// Store types: αν δεν έρχονται από το pipeline (store_meta.store_type),
+// συμπλήρωσέ τα εδώ. Τιμές ελεύθερες, π.χ. 'Mall', 'In Line', 'Drive Thru'.
+const STORE_TYPE_OVERRIDES = {
+  // 'KFC MALL': 'Mall', 'KFC SYNTAGMA': 'In Line', 'KFC GERAKAS': 'Drive Thru',
+};
+function wkStoreType(si) {
+  const name = STORES[si];
+  return STORE_TYPE_OVERRIDES[name] || (STORE_META[name] && STORE_META[name].store_type) || null;
+}
+
+// Channel-filtered daily index (cache ανά σύνολο καναλιών)
+const _wkChCache = {};
+function wkChannelDaily(ciSet) {
+  const key = [...ciSet].sort().join(',');
+  if (_wkChCache[key]) return _wkChCache[key];
+  const m = new Map();
+  REC_CH.forEach(r => {
+    if (!ciSet.has(r[2])) return;
+    let a = m.get(r[0]);
+    if (!a) { a = STORES.map(() => ({ sales: 0, tcs: 0 })); m.set(r[0], a); }
+    a[r[1]].sales += r[3]; a[r[1]].tcs += (r[4] || 0);
+  });
+  return _wkChCache[key] = m;
+}
+
+window.wkSet = function(k, v) { STATE[k] = v; STATE.weeklyDrill = null; renderActive(); };
+window.wkToggleCh = function(ci) {
+  const arr = STATE.weeklyChannels || [];
+  const i = arr.indexOf(ci);
+  if (ci === -1) STATE.weeklyChannels = [];
+  else if (i >= 0) { arr.splice(i, 1); STATE.weeklyChannels = arr; }
+  else { arr.push(ci); STATE.weeklyChannels = arr; }
+  STATE.weeklyDrill = null;
+  renderActive();
+};
+window.setAggCommission = function(v) { STATE.aggCommission = Math.max(0, Math.min(40, v || 0)); renderActive(); };
+window.wkDrill = function(si, w) {
+  const k = si + ':' + w;
+  STATE.weeklyDrill = (STATE.weeklyDrill === k) ? null : k;
+  renderActive();
+};
+
 function renderWeekly(R) {
   const root = document.getElementById('tab-weekly');
   const fmtK = v => v >= 1e6 ? (v / 1e6).toFixed(2).replace('.', ',') + 'M€' : Math.round(v / 1e3) + 'K€';
-  const sf = R.storeFilter;
+  const sfPeriod = R.storeFilter;
   const met = STATE.weeklyMetric || 'sales';
   const rangeN = STATE.weeklyRange != null ? STATE.weeklyRange : 13;
+  const chSel = STATE.weeklyChannels || [];
+  const typeSel = STATE.weeklyType || null;
+  const sssOn = !!STATE.weeklySSS;
+  const heatOn = STATE.weeklyView === 'heat';
+
+  // ---- Data source: με channel filter ή πλήρες ----
+  const dailySrc = chSel.length ? wkChannelDaily(new Set(chSel)) : dailyStore;
 
   const isoCur = getISOWeek(LATEST);
   const curIsoYear = isoCur[0], curIsoWeek = isoCur[1];
   const lyIsoYear = curIsoYear - 1;
   const curMon = isoWeekMonday(curIsoYear, curIsoWeek);
   const daysIntoWeek = Math.round((new Date(LATEST + 'T12:00:00Z') - new Date(curMon + 'T12:00:00Z')) / 86400000) + 1;
-
   const firstW = rangeN > 0 ? Math.max(1, curIsoWeek - rangeN + 1) : 1;
   const weeks = [];
   for (let w = firstW; w <= curIsoWeek; w++) weeks.push(w);
+
+  // ---- Store universe: period filter ∩ type filter ----
+  const inUniverse = (si) => {
+    if (sfPeriod && !sfPeriod.has(si)) return false;
+    if (typeSel && wkStoreType(si) !== typeSel) return false;
+    return true;
+  };
 
   function weekAgg(isoYear, w, clipDays) {
     const mon = isoWeekMonday(isoYear, w);
     const per = STORES.map(() => ({ s: 0, t: 0 }));
     const nDays = clipDays || 7;
     for (let d = 0; d < nDays; d++) {
-      const a = dailyStore.get(_wAddDays(mon, d));
+      const a = dailySrc.get(_wAddDays(mon, d));
       if (!a) continue;
       for (let si = 0; si < STORES.length; si++) {
-        if (sf && !sf.has(si)) continue;
+        if (!inUniverse(si)) continue;
         per[si].s += a[si].sales; per[si].t += a[si].tcs;
       }
     }
@@ -5101,44 +5543,77 @@ function renderWeekly(R) {
     cyW[w] = weekAgg(curIsoYear, w, clip);
     lyW[w] = weekAgg(lyIsoYear, w, clip);
   });
+  const fullWeeks = weeks.filter(w => w !== curIsoWeek);
 
-  const mval = (o) => met === 'tcs' ? o.t : (met === 'avg' ? (o.t > 0 ? o.s / o.t : null) : o.s);
+  // ---- Same-Store set: LY δεδομένα σε ΟΛΕΣ τις πλήρεις εβδομάδες ----
+  const isSSS = (si) => fullWeeks.length ? fullWeeks.every(w => lyW[w][si].s > 0) : true;
+
+  const mval = (s, t) => met === 'tcs' ? t : (met === 'avg' ? (t > 0 ? s / t : null) : s);
   const mfmt = (v) => v == null ? '—' : (met === 'tcs' ? fmtNum(v) : (met === 'avg' ? fmtAvg(v) : fmtK(v)));
 
+  // ---- Rows ----
   const rows = [];
   for (let si = 0; si < STORES.length; si++) {
-    if (sf && !sf.has(si)) continue;
+    if (!inUniverse(si)) continue;
+    if (sssOn && !isSSS(si)) continue;
     let totS = 0, totT = 0, lyS = 0, lyT = 0, any = false;
     const cells = weeks.map(w => {
       const cy = cyW[w][si], ly = lyW[w][si];
       if (cy.s > 0 || ly.s > 0) any = true;
       totS += cy.s; totT += cy.t; lyS += ly.s; lyT += ly.t;
-      const cv = mval(cy), lv = mval(ly);
+      const cv = mval(cy.s, cy.t), lv = mval(ly.s, ly.t);
       const yoy = (cv != null && lv != null && lv > 0 && cv > 0) ? cv / lv - 1 : null;
       return { w, cv, lv, yoy, cyS: cy.s, cyT: cy.t, lyS: ly.s, lyT: ly.t };
     });
     if (!any) continue;
-    const totCv = met === 'tcs' ? totT : (met === 'avg' ? (totT > 0 ? totS / totT : null) : totS);
-    const totLv = met === 'tcs' ? lyT : (met === 'avg' ? (lyT > 0 ? lyS / lyT : null) : lyS);
-    const totYoy = (totCv != null && totLv != null && totLv > 0) ? totCv / totLv - 1 : null;
-    rows.push({ si, short: STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si], cells, totCv, totYoy, sortKey: totS });
+    const totCv = mval(totS, totT), totLv = mval(lyS, lyT);
+    // streaks (τελευταίες πλήρεις εβδομάδες, sales-based)
+    let streak = 0;
+    for (let i = cells.length - 1; i >= 0; i--) {
+      const cl = cells[i];
+      if (cl.w === curIsoWeek) continue;
+      const y = (cl.lyS > 0 && cl.cyS > 0) ? cl.cyS / cl.lyS - 1 : null;
+      if (y == null) break;
+      if (streak === 0) streak = y >= 0 ? 1 : -1;
+      else if (streak > 0 && y >= 0) streak++;
+      else if (streak < 0 && y < 0) streak--;
+      else break;
+    }
+    rows.push({
+      si, short: STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si],
+      type: wkStoreType(si), cells, totCv,
+      totYoy: (totCv != null && totLv != null && totLv > 0) ? totCv / totLv - 1 : null,
+      streak, sss: isSSS(si), sortKey: totS,
+    });
   }
   rows.sort((a, b) => b.sortKey - a.sortKey);
 
   const chainCells = weeks.map(w => {
     let cs = 0, ct = 0, ls = 0, lt = 0;
-    for (let si = 0; si < STORES.length; si++) {
-      if (sf && !sf.has(si)) continue;
-      cs += cyW[w][si].s; ct += cyW[w][si].t; ls += lyW[w][si].s; lt += lyW[w][si].t;
-    }
-    const cv = met === 'tcs' ? ct : (met === 'avg' ? (ct > 0 ? cs / ct : null) : cs);
-    const lv = met === 'tcs' ? lt : (met === 'avg' ? (lt > 0 ? ls / lt : null) : ls);
+    rows.forEach(r => { cs += cyW[w][r.si].s; ct += cyW[w][r.si].t; ls += lyW[w][r.si].s; lt += lyW[w][r.si].t; });
+    const cv = mval(cs, ct), lv = mval(ls, lt);
     return { w, cv, lv, yoy: (cv != null && lv != null && lv > 0 && cv > 0) ? cv / lv - 1 : null, cs, ct, ls, lt };
   });
 
-  const fullWeeks = weeks.filter(w => w !== curIsoWeek);
-  const rec4 = fullWeeks.slice(-4);
-  const prev4 = fullWeeks.slice(-8, -4);
+  // ---- Holidays ανά εβδομάδα (CY & LY) ----
+  function weekHols(isoYear, w) {
+    const mon = isoWeekMonday(isoYear, w);
+    const out = [];
+    for (let d = 0; d < 7; d++) {
+      const ds = _wAddDays(mon, d);
+      const hn = holidayName(ds);
+      if (hn) out.push(hn + ' (' + ds.slice(8, 10) + '/' + ds.slice(5, 7) + ')');
+    }
+    return out;
+  }
+
+  // ---- KEY TAKEAWAYS ----
+  const rec4 = fullWeeks.slice(-4), prev4 = fullWeeks.slice(-8, -4);
+  function sumWeeks(ws, getter) {
+    let cs = 0, ls = 0;
+    ws.forEach(w => rows.forEach(r => { cs += getter(cyW[w][r.si]); ls += getter(lyW[w][r.si]); }));
+    return [cs, ls];
+  }
   function storeYoY(si, ws) {
     let cs = 0, ls = 0;
     ws.forEach(w => { cs += cyW[w][si].s; ls += lyW[w][si].s; });
@@ -5148,7 +5623,8 @@ function renderWeekly(R) {
   {
     let cs = 0, ls = 0, ct = 0, lt = 0;
     chainCells.forEach(cc => { cs += cc.cs; ls += cc.ls; ct += cc.ct; lt += cc.lt; });
-    if (ls > 0) insights.push('Αλυσίδα (' + weeks.length + ' εβδ): πωλήσεις ' + fmtPct(cs / ls - 1) + ' vs LY · TCs ' + (lt > 0 ? fmtPct(ct / lt - 1) : '—') + ' · ticket ' + ((ct > 0 && lt > 0) ? fmtPct((cs / ct) / (ls / lt) - 1) : '—'));
+    const scopeName = (chSel.length ? chSel.map(ci => CHANNELS[ci]).join('+') : 'Όλα τα κανάλια') + (typeSel ? ' · ' + typeSel : '') + (sssOn ? ' · Same-Store' : '');
+    if (ls > 0) insights.push(scopeName + ' (' + weeks.length + ' εβδ): πωλήσεις ' + fmtPct(cs / ls - 1) + ' vs LY · TCs ' + (lt > 0 ? fmtPct(ct / lt - 1) : '—') + ' · ticket ' + ((ct > 0 && lt > 0) ? fmtPct((cs / ct) / (ls / lt) - 1) : '—'));
     const perf = rows.map(r => ({ short: r.short, y: storeYoY(r.si, fullWeeks) })).filter(x => x.y != null);
     if (perf.length >= 2) {
       const best = perf.reduce((a, b) => b.y > a.y ? b : a);
@@ -5168,54 +5644,212 @@ function renderWeekly(R) {
     }
   }
 
-  let html = '<div class="trend-metric-bar">' +
+  // ---- ΤΑΣΕΙΣ & ΜΕΤΑΤΟΠΙΣΕΙΣ ----
+  const shifts = [];
+  if (rec4.length === 4 && prev4.length === 4) {
+    // 1) Channel substitution: share last4 vs prev4 (respect type/SSS scope, ΟΧΙ channel filter)
+    const storeSet = new Set(rows.map(r => r.si));
+    function chShares(ws) {
+      const per = {};
+      let tot = 0;
+      const wkSet2 = new Set();
+      ws.forEach(w => {
+        const mon = isoWeekMonday(curIsoYear, w);
+        for (let d = 0; d < 7; d++) wkSet2.add(_wAddDays(mon, d));
+      });
+      REC_CH.forEach(r => {
+        if (!wkSet2.has(r[0]) || !storeSet.has(r[1])) return;
+        per[r[2]] = (per[r[2]] || 0) + r[3];
+        tot += r[3];
+      });
+      return { per, tot };
+    }
+    const a = chShares(prev4), b = chShares(rec4);
+    if (a.tot > 0 && b.tot > 0) {
+      const deltas = CHANNELS.map((name, ci) => ({
+        name, d: ((b.per[ci] || 0) / b.tot - (a.per[ci] || 0) / a.tot) * 100,
+        shareNow: (b.per[ci] || 0) / b.tot * 100,
+      })).filter(x => x.shareNow > 1 || Math.abs(x.d) > 0.5).sort((x, y) => y.d - x.d);
+      const up = deltas[0], down = deltas[deltas.length - 1];
+      if (up && down && up.d > 0.8 && down.d < -0.8) {
+        shifts.push('🔄 Μετατόπιση καναλιών (τελ. 4 εβδ vs προηγ. 4): <strong>' + up.name + '</strong> +' + up.d.toFixed(1).replace('.', ',') + 'μ share, <strong>' + down.name + '</strong> ' + down.d.toFixed(1).replace('.', ',') + 'μ — πιθανή υποκατάσταση.');
+      } else if (up && up.d > 0.8) {
+        shifts.push('🔄 Κερδίζει έδαφος: <strong>' + up.name + '</strong> +' + up.d.toFixed(1).replace('.', ',') + 'μ share τις τελευταίες 4 εβδ.');
+      }
+    }
+    // 2) Segment trends (store types)
+    const types = [...new Set(rows.map(r => r.type).filter(Boolean))];
+    if (types.length >= 2) {
+      const perType = types.map(tp => {
+        let cs = 0, ls = 0;
+        rows.filter(r => r.type === tp).forEach(r => rec4.forEach(w => { cs += cyW[w][r.si].s; ls += lyW[w][r.si].s; }));
+        return { tp, y: ls > 0 ? cs / ls - 1 : null };
+      }).filter(x => x.y != null).sort((x, y) => x.y - y.y);
+      if (perType.length >= 2 && (perType[perType.length - 1].y - perType[0].y) > 0.04) {
+        shifts.push('🏬 Ανά τύπο (τελ. 4 εβδ): ' + perType.map(x => '<strong>' + x.tp + '</strong> ' + fmtPct(x.y)).join(' · ') + ' — η απόκλιση συγκεντρώνεται στο ' + perType[0].tp + '.');
+      }
+    }
+    // 3) TCs vs AVG divergence (chain + top stores, last4)
+    function tcAvgYoY(si) {
+      let cs = 0, ls = 0, ct = 0, lt = 0;
+      rec4.forEach(w => { cs += cyW[w][si].s; ls += lyW[w][si].s; ct += cyW[w][si].t; lt += lyW[w][si].t; });
+      if (ls <= 0 || lt <= 0 || ct <= 0) return null;
+      return { t: ct / lt - 1, a: (cs / ct) / (ls / lt) - 1 };
+    }
+    const divs = rows.map(r => { const x = tcAvgYoY(r.si); return x ? { short: r.short, ...x } : null; })
+      .filter(x => x && ((x.t > 0.03 && x.a < -0.03) || (x.t < -0.03 && x.a > 0.03)))
+      .sort((x, y) => Math.abs(y.t - y.a) - Math.abs(x.t - x.a)).slice(0, 2);
+    divs.forEach(x => {
+      if (x.t > 0) shifts.push('⚖️ <strong>' + x.short + '</strong>: TCs ' + fmtPct(x.t) + ' αλλά ticket ' + fmtPct(x.a) + ' — όγκος με χαμηλότερο καλάθι (προσφορές/mix;).');
+      else shifts.push('⚖️ <strong>' + x.short + '</strong>: ticket ' + fmtPct(x.a) + ' αλλά TCs ' + fmtPct(x.t) + ' — κρατάει τζίρο με λιγότερους πελάτες (τιμές;).');
+    });
+  }
+
+  // ================= RENDER =================
+  const chip = (label, active, onclick, extra) => '<button class="trend-metric-chip ' + (active ? 'active' : '') + '" onclick="' + onclick + '"' + (extra || '') + '>' + label + '</button>';
+  let html = '<div class="trend-metric-bar" style="flex-wrap:wrap">' +
     '<span class="tm-label">ΜΕΤΡΙΚΗ</span>' +
-    '<button class="trend-metric-chip ' + (met === 'sales' ? 'active' : '') + '" onclick="window.setWeeklyMetric(\'sales\')">Πωλήσεις (€)</button>' +
-    '<button class="trend-metric-chip ' + (met === 'tcs' ? 'active' : '') + '" onclick="window.setWeeklyMetric(\'tcs\')">Συναλλαγές</button>' +
-    '<button class="trend-metric-chip ' + (met === 'avg' ? 'active' : '') + '" onclick="window.setWeeklyMetric(\'avg\')">Μέσο Ticket</button>' +
-    '<span class="tm-label" style="margin-left:14px">ΕΒΔΟΜΑΔΕΣ</span>' +
-    '<button class="trend-metric-chip ' + (rangeN === 8 ? 'active' : '') + '" onclick="window.setWeeklyRange(8)">8</button>' +
-    '<button class="trend-metric-chip ' + (rangeN === 13 ? 'active' : '') + '" onclick="window.setWeeklyRange(13)">13</button>' +
-    '<button class="trend-metric-chip ' + (rangeN === 0 ? 'active' : '') + '" onclick="window.setWeeklyRange(0)">Όλες (W1→)</button>' +
+    chip('Πωλήσεις (€)', met === 'sales', "window.wkSet('weeklyMetric','sales')") +
+    chip('Συναλλαγές', met === 'tcs', "window.wkSet('weeklyMetric','tcs')") +
+    chip('Μέσο Ticket', met === 'avg', "window.wkSet('weeklyMetric','avg')") +
+    '<span class="tm-label" style="margin-left:12px">ΕΒΔ</span>' +
+    chip('8', rangeN === 8, "window.wkSet('weeklyRange',8)") +
+    chip('13', rangeN === 13, "window.wkSet('weeklyRange',13)") +
+    chip('Όλες', rangeN === 0, "window.wkSet('weeklyRange',0)") +
+    '<span class="tm-label" style="margin-left:12px">ΠΕΔΙΟ</span>' +
+    chip('Same-Store', sssOn, "window.wkSet('weeklySSS'," + (!sssOn) + ")", ' title="Μόνο stores με πλήρη LY δεδομένα — καθαρό οργανικό growth"') +
+    chip(heatOn ? 'Heatmap ✓' : 'Heatmap', heatOn, "window.wkSet('weeklyView','" + (heatOn ? 'val' : 'heat') + "')") +
     '</div>';
+
+  // Channel chips
+  html += '<div class="trend-metric-bar" style="flex-wrap:wrap">' +
+    '<span class="tm-label">ΚΑΝΑΛΙ</span>' +
+    chip('Όλα', chSel.length === 0, 'window.wkToggleCh(-1)') +
+    CHANNELS.map((name, ci) => chip(name, chSel.includes(ci), 'window.wkToggleCh(' + ci + ')')).join('') +
+    '</div>';
+
+  // Store-type chips (μόνο αν υπάρχουν τύποι)
+  const allTypes = [...new Set(STORES.map((_, si) => wkStoreType(si)).filter(Boolean))].sort();
+  if (allTypes.length >= 2) {
+    html += '<div class="trend-metric-bar" style="flex-wrap:wrap">' +
+      '<span class="tm-label">ΤΥΠΟΣ</span>' +
+      chip('Όλοι', !typeSel, "window.wkSet('weeklyType',null)") +
+      allTypes.map(tp => chip(tp, typeSel === tp, "window.wkSet('weeklyType','" + tp.replace(/'/g, "\\'") + "')")).join('') +
+      '</div>';
+  } else if (allTypes.length === 0) {
+    html += '<div style="font-size:10px;color:var(--text-2);font-family:var(--mono);margin:2px 0 8px">Φίλτρο τύπου (In Line/Mall…): συμπλήρωσε το STORE_TYPE_OVERRIDES στο index.html ή πρόσθεσε store_type στο pipeline.</div>';
+  }
 
   if (insights.length) {
     html += '<div class="panel-section"><div class="section-title"><span>Key Takeaways</span><span class="meta">αυτόματα · πλήρεις εβδομάδες</span></div>' +
       insights.map(t => '<div class="insight" style="margin-bottom:6px"><div class="ins-text">' + t + '</div></div>').join('') + '</div>';
   }
+  if (shifts.length) {
+    html += '<div class="panel-section"><div class="section-title"><span>Τάσεις &amp; Μετατοπίσεις</span><span class="meta">τελευταίες 4 πλήρεις εβδομάδες vs προηγούμενες 4</span></div>' +
+      shifts.map(t => '<div class="insight" style="margin-bottom:6px"><div class="ins-text">' + t + '</div></div>').join('') + '</div>';
+  }
+
+  // ---- 📝 Auto-σύνοψη τελευταίας πλήρους εβδομάδας ----
+  try {
+    const lw = fullWeeks.length ? fullWeeks[fullWeeks.length - 1] : null;
+    html += '<div style="margin:4px 0 12px"><button class="trend-metric-chip ' + (STATE.weeklySummary ? 'active' : '') + '" onclick="window.wkSet(\'weeklySummary\',' + (!STATE.weeklySummary) + ')">📝 Σύνοψη εβδομάδας</button></div>';
+    if (STATE.weeklySummary && lw != null) {
+      let cs = 0, ls = 0, ct = 0, lt = 0, sssCs = 0, sssLs = 0;
+      rows.forEach(r => {
+        cs += cyW[lw][r.si].s; ls += lyW[lw][r.si].s; ct += cyW[lw][r.si].t; lt += lyW[lw][r.si].t;
+        if (isSSS(r.si)) { sssCs += cyW[lw][r.si].s; sssLs += lyW[lw][r.si].s; }
+      });
+      const perfW = rows.map(r => ({ short: r.short, y: (lyW[lw][r.si].s > 0 && cyW[lw][r.si].s > 0) ? cyW[lw][r.si].s / lyW[lw][r.si].s - 1 : null })).filter(x => x.y != null);
+      const parts = [];
+      if (ls > 0) parts.push('Η W' + lw + ' έκλεισε ' + fmtPct(cs / ls - 1) + ' vs LY' + (sssLs > 0 ? ' (Same-Store ' + fmtPct(sssCs / sssLs - 1) + ')' : '') + ', με TCs ' + (lt > 0 ? fmtPct(ct / lt - 1) : '—') + ' και μέσο ticket ' + ((ct > 0 && lt > 0) ? fmtPct((cs / ct) / (ls / lt) - 1) : '—') + '.');
+      if (perfW.length >= 2) {
+        const b = perfW.reduce((a, x) => x.y > a.y ? x : a), w2 = perfW.reduce((a, x) => x.y < a.y ? x : a);
+        parts.push('Ξεχώρισε το ' + b.short + ' (' + fmtPct(b.y) + '), ενώ το ' + w2.short + ' υστέρησε (' + fmtPct(w2.y) + ').');
+      }
+      const negStreaks = rows.filter(r => r.streak <= -3).map(r => r.short + ' (' + (-r.streak) + 'η)');
+      if (negStreaks.length) parts.push('Συνεχόμενες αρνητικές εβδομάδες: ' + negStreaks.join(', ') + '.');
+      const posStreaks = rows.filter(r => r.streak >= 3).map(r => r.short);
+      if (posStreaks.length) parts.push('Σταθερά θετικά: ' + posStreaks.join(', ') + '.');
+      shifts.forEach(s => parts.push(s.replace(/<[^>]+>/g, '').replace(/^[🔄🏬⚖️\s]+/, '')));
+      const wkHolsTxt = weekHols(curIsoYear, lw);
+      if (wkHolsTxt.length) parts.push('Η εβδομάδα περιλάμβανε: ' + wkHolsTxt.join(', ') + '.');
+      const lwMon = isoWeekMonday(curIsoYear, lw), lwSun = _wAddDays(lwMon, 6);
+      const dfmt = ds => (+ds.slice(8, 10)) + '/' + (+ds.slice(5, 7));
+      html += '<div class="panel-section"><div class="section-title"><span>📝 Σύνοψη W' + lw + ' — Δευ ' + dfmt(lwMon) + ' έως Κυρ ' + dfmt(lwSun) + '</span><span class="meta">τελευταία ολοκληρωμένη εβδομάδα · ανανεώνεται αυτόματα κάθε Δευτέρα με τα δεδομένα της Κυριακής</span></div>' +
+        '<div class="insight"><div class="ins-text" id="wkSummaryText" style="line-height:1.6">' + parts.join(' ') + '</div></div>' +
+        '<button class="trend-metric-chip" style="margin-top:8px" onclick="navigator.clipboard.writeText(document.getElementById(\'wkSummaryText\').innerText).then(()=>{this.textContent=\'✓ Αντιγράφηκε\';setTimeout(()=>this.textContent=\'📋 Αντιγραφή\',1500)})">📋 Αντιγραφή</button></div>';
+    }
+  } catch (e) { /* additive */ }
 
   const yoyTag = (y) => y == null ? '<div style="font-size:8px;color:var(--text-2)">—</div>'
     : '<div style="font-size:9px;font-weight:700;color:' + (y >= 0 ? 'var(--good)' : 'var(--bad)') + '">' + (y >= 0 ? '+' : '') + (y * 100).toFixed(1).replace('.', ',') + '%</div>';
   const cellBg = (y) => y == null ? '' : 'background:' + (y >= 0 ? 'rgba(34,197,94,0.10)' : (y < -0.05 ? 'rgba(239,68,68,0.13)' : 'rgba(245,158,11,0.10)'));
-  const cellTitle = (cl) => 'W' + cl.w + ' — CY: ' + Math.round(cl.cyS).toLocaleString('el-GR') + '€ / ' + cl.cyT + ' TCs · LY: ' + Math.round(cl.lyS).toLocaleString('el-GR') + '€ / ' + cl.lyT + ' TCs';
+  const heatBg = (y) => {
+    if (y == null) return '';
+    const al = Math.min(0.55, Math.abs(y) * 2.2 + 0.06);
+    return 'background:rgba(' + (y >= 0 ? '34,197,94' : '239,68,68') + ',' + al.toFixed(2) + ')';
+  };
+  const stickyTh = 'text-align:left;position:sticky;left:0;background:var(--bg-2);z-index:2;box-shadow:2px 0 4px rgba(0,0,0,0.35)';
+  const stickyTd = 'text-align:left;position:sticky;left:0;background:var(--bg-1);z-index:1;box-shadow:2px 0 4px rgba(0,0,0,0.35)';
+  const streakIcon = (s) => s >= 3 ? ' <span title="' + s + ' συνεχόμενες θετικές εβδομάδες">🟢</span>' : (s <= -3 ? ' <span title="' + (-s) + ' συνεχόμενες αρνητικές εβδομάδες">🔴</span>' : '');
 
-  let chainTotYoy = null, chainTotCv = null;
-  {
-    let cs = 0, ls = 0, ct = 0, lt = 0;
-    chainCells.forEach(cc => { cs += cc.cs; ls += cc.ls; ct += cc.ct; lt += cc.lt; });
-    chainTotCv = met === 'tcs' ? ct : met === 'avg' ? (ct > 0 ? cs / ct : null) : cs;
-    const lv = met === 'tcs' ? lt : met === 'avg' ? (lt > 0 ? ls / lt : null) : ls;
-    chainTotYoy = (chainTotCv != null && lv != null && lv > 0) ? chainTotCv / lv - 1 : null;
+  const drillKey = STATE.weeklyDrill;
+  function drillRow(si, w) {
+    const monCY = isoWeekMonday(curIsoYear, w), monLY = isoWeekMonday(lyIsoYear, w);
+    const DOW = ['Δευ', 'Τρί', 'Τετ', 'Πέμ', 'Παρ', 'Σάβ', 'Κυρ'];
+    let inner = '<table class="desktop-table" style="font-size:10px;max-width:660px"><thead><tr><th>Ημέρα</th><th>CY</th><th>LY</th><th>Δ</th><th></th></tr></thead><tbody>';
+    for (let d = 0; d < 7; d++) {
+      const dsC = _wAddDays(monCY, d), dsL = _wAddDays(monLY, d);
+      const aC = dailySrc.get(dsC), aL = dailySrc.get(dsL);
+      const cv = aC ? mval(aC[si].sales, aC[si].tcs) : null;
+      const lv = aL ? mval(aL[si].sales, aL[si].tcs) : null;
+      const y = (cv != null && lv != null && lv > 0 && cv > 0) ? cv / lv - 1 : null;
+      const hn = holidayName(dsC), hnL = holidayName(dsL);
+      const future = dsC > LATEST;
+      inner += '<tr' + (future ? ' style="opacity:0.4"' : '') + '><td>' + DOW[d] + ' ' + dsC.slice(8, 10) + '/' + dsC.slice(5, 7) + '</td>' +
+        '<td>' + (future ? '—' : mfmt(cv)) + '</td><td>' + mfmt(lv) + '</td>' +
+        '<td>' + (future ? '—' : (y == null ? '—' : (y >= 0 ? '+' : '') + (y * 100).toFixed(1).replace('.', ',') + '%')) + '</td>' +
+        '<td style="font-size:9px">' + (hn ? '🎉 ' + hn : '') + (hnL && !hn ? '<span style="opacity:0.6" title="αργία μόνο πέρσι">⚠ LY: ' + hnL + '</span>' : '') + '</td></tr>';
+    }
+    return inner + '</tbody></table>';
   }
 
   html += '<div class="panel-section">' +
-    '<div class="section-title"><span>Store × Εβδομάδα vs LY — ' + (met === 'tcs' ? 'Συναλλαγές' : met === 'avg' ? 'Μέσο Ticket' : 'Πωλήσεις') + '</span>' +
-    '<span class="meta">ISO εβδομάδες ' + curIsoYear + ' vs ' + lyIsoYear + ' · W' + firstW + '–W' + curIsoWeek + '</span></div>' +
-    '<div style="overflow-x:auto"><table class="desktop-table" style="font-size:10px">' +
-    '<thead><tr><th style="text-align:left;position:sticky;left:0;background:var(--bg-2);z-index:2">Store</th><th>Σύνολο</th>' +
-    weeks.map(w => '<th>W' + w + (w === curIsoWeek ? '<br><span style="font-size:8px;font-weight:400">(' + daysIntoWeek + 'ημ)</span>' : '') + '</th>').join('') +
-    '</tr></thead><tbody>' +
-    '<tr class="row-grand"><td style="text-align:left;position:sticky;left:0;background:var(--bg-2);z-index:2"><strong>ΑΛΥΣΙΔΑ</strong></td>' +
-    '<td><strong>' + mfmt(chainTotCv) + '</strong>' + yoyTag(chainTotYoy) + '</td>' +
-    chainCells.map(cc => '<td title="W' + cc.w + ' — CY: ' + Math.round(cc.cs).toLocaleString('el-GR') + '€ · LY: ' + Math.round(cc.ls).toLocaleString('el-GR') + '€"><strong>' + mfmt(cc.cv) + '</strong>' + yoyTag(cc.yoy) + '</td>').join('') +
-    '</tr>' +
-    rows.map(r => '<tr><td style="text-align:left;position:sticky;left:0;background:var(--bg-1);z-index:1"><strong>' + r.short + '</strong></td>' +
+    '<div class="section-title"><span>Store × Εβδομάδα vs LY — ' + (met === 'tcs' ? 'Συναλλαγές' : met === 'avg' ? 'Μέσο Ticket' : 'Πωλήσεις') + (chSel.length ? ' · ' + chSel.map(ci => CHANNELS[ci]).join('+') : '') + '</span>' +
+    '<span class="meta">ISO ' + curIsoYear + ' vs ' + lyIsoYear + ' · W' + firstW + '–W' + curIsoWeek + ' · κλικ σε κελί = ημέρες</span></div>' +
+    '<div style="overflow-x:auto;max-width:100%"><table class="desktop-table" data-wk="1" data-noexport="1" style="font-size:10px;border-collapse:separate;border-spacing:0;overflow:visible;border-radius:0;width:max-content;min-width:100%">' +
+    '<thead><tr><th style="' + stickyTh + '">Store</th><th>Σύνολο</th>' +
+    weeks.map(w => {
+      const hC = weekHols(curIsoYear, w), hL = weekHols(lyIsoYear, w);
+      const mism = (hC.length > 0) !== (hL.length > 0);
+      const icon = hC.length ? ' <span title="' + hC.join(' · ') + (mism ? ' — ΠΡΟΣΟΧΗ: πέρσι η εβδομάδα δεν είχε αργία' : '') + '">🎉' + (mism ? '⚠' : '') + '</span>'
+        : (hL.length ? ' <span title="Πέρσι είχε: ' + hL.join(' · ') + '" style="opacity:0.55">⚠</span>' : '');
+      return '<th>W' + w + icon + (w === curIsoWeek ? '<br><span style="font-size:8px;font-weight:400">(' + daysIntoWeek + 'ημ)</span>' : '') + '</th>';
+    }).join('') +
+    '</tr></thead><tbody>';
+
+  // Chain row
+  {
+    let cs = 0, ls = 0, ct = 0, lt = 0;
+    chainCells.forEach(cc => { cs += cc.cs; ls += cc.ls; ct += cc.ct; lt += cc.lt; });
+    const cv = mval(cs, ct), lv = mval(ls, lt);
+    html += '<tr class="row-grand"><td style="' + stickyTh + '"><strong>ΑΛΥΣΙΔΑ</strong>' + (sssOn ? ' <span style="font-size:8px">(SSS ' + rows.length + ')</span>' : '') + '</td>' +
+      '<td><strong>' + mfmt(cv) + '</strong>' + yoyTag((cv != null && lv != null && lv > 0) ? cv / lv - 1 : null) + '</td>' +
+      chainCells.map(cc => '<td title="W' + cc.w + ' — CY: ' + Math.round(cc.cs).toLocaleString('el-GR') + '€ · LY: ' + Math.round(cc.ls).toLocaleString('el-GR') + '€">' + (heatOn ? yoyTag(cc.yoy).replace('font-size:9px', 'font-size:10px') : '<strong>' + mfmt(cc.cv) + '</strong>' + yoyTag(cc.yoy)) + '</td>').join('') + '</tr>';
+  }
+  // Store rows (+ drill)
+  rows.forEach(r => {
+    html += '<tr><td style="' + stickyTd + '"><strong>' + r.short + '</strong>' + streakIcon(r.streak) + (r.type ? ' <span style="font-size:8px;color:var(--text-2)">' + r.type + '</span>' : '') + (!r.sss && !sssOn ? ' <span style="font-size:8px" title="χωρίς πλήρη LY δεδομένα">🆕</span>' : '') + '</td>' +
       '<td>' + mfmt(r.totCv) + yoyTag(r.totYoy) + '</td>' +
-      r.cells.map(cl => '<td title="' + cellTitle(cl) + '" style="' + cellBg(cl.yoy) + '">' + mfmt(cl.cv) + yoyTag(cl.yoy) + '</td>').join('') +
-      '</tr>').join('') +
-    '</tbody></table></div>' +
-    '<div style="font-size:10px;color:var(--text-2);font-family:var(--mono);padding-top:6px">LY = ίδια ISO εβδομάδα ' + lyIsoYear + ' (ίδιες μέρες εβδομάδας — καμία μερική W1). Η τρέχουσα W' + curIsoWeek + ' συγκρίνεται με τις ίδιες ' + daysIntoWeek + ' μέρες πέρσι. Χρώμα: πράσινο ≥ LY · κίτρινο έως −5% · κόκκινο κάτω.</div>' +
-    '</div>';
+      r.cells.map(cl => '<td onclick="window.wkDrill(' + r.si + ',' + cl.w + ')" style="cursor:pointer;' + (heatOn ? heatBg(cl.yoy) : cellBg(cl.yoy)) + '" title="W' + cl.w + ' — CY: ' + Math.round(cl.cyS).toLocaleString('el-GR') + '€ / ' + cl.cyT + ' TCs · LY: ' + Math.round(cl.lyS).toLocaleString('el-GR') + '€ / ' + cl.lyT + ' TCs — κλικ για ημέρες">' + (heatOn ? yoyTag(cl.yoy) : mfmt(cl.cv) + yoyTag(cl.yoy)) + '</td>').join('') + '</tr>';
+    if (drillKey === r.si + ':' + (drillKey ? drillKey.split(':')[1] : '')) { /* handled below */ }
+    if (drillKey && drillKey.split(':')[0] == r.si) {
+      const w = +drillKey.split(':')[1];
+      html += '<tr><td colspan="' + (weeks.length + 2) + '" style="background:var(--bg-2);padding:8px 12px"><div style="font-size:10px;margin-bottom:4px;color:var(--text-2)">📅 ' + r.short + ' — W' + w + ' ανά ημέρα (' + (met === 'tcs' ? 'TCs' : met === 'avg' ? 'Ticket' : '€') + (chSel.length ? ' · ' + chSel.map(ci => CHANNELS[ci]).join('+') : '') + ')</div>' + drillRow(r.si, w) + '</td></tr>';
+    }
+  });
+  html += '</tbody></table></div>' +
+    '<div style="font-size:10px;color:var(--text-2);font-family:var(--mono);padding-top:6px">LY = ίδια ISO εβδομάδα ' + lyIsoYear + '. Τρέχουσα W' + curIsoWeek + ' = ίδιες ' + daysIntoWeek + ' μέρες πέρσι. 🎉 αργία · ⚠ ασυμμετρία αργίας CY/LY · 🟢/🔴 3+ συνεχόμενες θετικές/αρνητικές εβδ. Κλικ σε κελί → ημέρες.</div></div>';
 
   // Chain weekly line chart CY vs LY
   {
@@ -5247,7 +5881,7 @@ function renderWeekly(R) {
       svg += '<rect x="' + (P.l + 8) + '" y="' + P.t + '" width="14" height="3" fill="#ef4444"/><text x="' + (P.l + 26) + '" y="' + (P.t + 5) + '" fill="var(--text-1)" font-size="10">CY ' + curIsoYear + '</text>';
       svg += '<rect x="' + (P.l + 100) + '" y="' + P.t + '" width="14" height="3" fill="#f59e0b"/><text x="' + (P.l + 118) + '" y="' + (P.t + 5) + '" fill="var(--text-1)" font-size="10">LY ' + lyIsoYear + '</text>';
       svg += '</svg>';
-      html += '<div class="panel-section"><div class="section-title"><span>Αλυσίδα — εβδομαδιαία εξέλιξη</span><span class="meta">CY vs LY (ISO)</span></div><div class="chart-wrap">' + svg + '</div></div>';
+      html += '<div class="panel-section"><div class="section-title"><span>Εβδομαδιαία εξέλιξη</span><span class="meta">CY vs LY (ISO)' + (chSel.length ? ' · ' + chSel.map(ci => CHANNELS[ci]).join('+') : '') + '</span></div><div class="chart-wrap">' + svg + '</div></div>';
     }
   }
 
@@ -6392,6 +7026,68 @@ function _hourlyExportBlocks(R) {
 // MAIN: export the currently active tab
 window.exportActiveTabExcel = exportActiveTabExcel;
 window.exportSingleTable = exportSingleTable;
+// «938K€»→938000, «11,17M€»→11170000, «13,20 €»→13.2, «1.234»→1234 — αλλιώς string
+function _wkNum(s) {
+  if (!s || s === '—') return '—';
+  const t = String(s).replace(/\s/g, '');
+  let m = t.match(/^([\d.,]+)M€$/);
+  if (m) return Math.round(parseFloat(m[1].replace(/\./g, '').replace(',', '.')) * 1e6);
+  m = t.match(/^([\d.,]+)K€$/);
+  if (m) return Math.round(parseFloat(m[1].replace(/\./g, '').replace(',', '.')) * 1e3);
+  m = t.match(/^([\d.,]+)€$/);
+  if (m) return parseFloat(m[1].replace(/\./g, '').replace(',', '.'));
+  m = t.match(/^([\d.]+)$/);
+  if (m) return parseInt(m[1].replace(/\./g, ''), 10);
+  return s;
+}
+// «-6,6%» → -0.066 (για format 0.0%)
+function _wkPct(s) {
+  if (!s || s === '—') return '—';
+  const m = String(s).replace(/\s/g, '').match(/^([+\-]?[\d.,]+)%$/);
+  if (m) return parseFloat(m[1].replace(',', '.')) / 100;
+  return s;
+}
+
+// Weekly πίνακας → Excel: κάθε εβδομάδα σε ΔΥΟ στήλες (τιμή + Δ% vs LY)
+function _weeklyExportBlocks() {
+  const tbl = document.querySelector('#tab-weekly table[data-wk]');
+  if (!tbl) return [];
+  const ths = [...tbl.querySelectorAll('thead th')].map(t =>
+    t.textContent.replace(/\(\d+ημ\)/, '').replace(/🎉|⚠/g, '').replace(/\s+/g, ' ').trim());
+  const headers = [ths[0]];
+  for (let i = 1; i < ths.length; i++) { headers.push(ths[i]); headers.push(ths[i] + ' vs LY'); }
+  const rows = [];
+  [...tbl.querySelectorAll('tbody tr')].forEach(tr => {
+    if (tr.querySelector('td[colspan]')) return;  // drill rows εκτός
+    const tds = [...tr.querySelectorAll('td')];
+    if (!tds.length) return;
+    const out = [tds[0].textContent.replace(/🟢|🔴|🆕/g, '').replace(/\s+/g, ' ').trim()];
+    for (let i = 1; i < tds.length; i++) {
+      const td = tds[i];
+      const yoyDiv = td.querySelector('div');
+      const yoy = yoyDiv ? yoyDiv.textContent.trim() : '';
+      let val = td.textContent;
+      if (yoy) val = val.replace(yoy, '');
+      val = val.replace(/\s+/g, ' ').trim();
+      out.push(_wkNum(val));
+      out.push(_wkPct(yoy));
+    }
+    rows.push(out);
+  });
+  function noop() {}
+  if (!rows.length) return [];
+  // numFmts: col0 text, then alternating value/pct
+  const numFmts = headers.map((h, i) => {
+    if (i === 0) return 'text';
+    if (/vs LY/.test(h)) return 'pct1';
+    const sample = rows.map(r => r[i]).find(v => typeof v === 'number');
+    if (sample == null) return 'text';
+    return sample > 500 ? 'eur' : 'eur2';
+  });
+  const title = 'Store × Εβδομάδα vs LY';
+  return [{ type: 'table', title, headers, rows, numFmts }];
+}
+
 function exportActiveTabExcel() {
   if (typeof JSZip === 'undefined' || typeof XlsxEngine === 'undefined') {
     alert('Η βιβλιοθήκη εξαγωγής δεν φόρτωσε. Κάνε hard refresh (Ctrl+Shift+R).');
@@ -6403,6 +7099,7 @@ function exportActiveTabExcel() {
     overview:'Overview', bystore:'By Store', salestype:'By Sales Type', channels:'By Channel',
     rankings:'Rankings', dow:'Day-of-Week', trend:'Trend', storedeep:'Store Deep-Dive',
     multiyear:'Πολυετές', insights:'Insights', hourly:'Hourly',
+    weekly:'Weekly vs LY', forecast:'Forecast',
   };
   const tabLabel = tabNames[tab] || tab;
   const blocks = [];
@@ -6420,11 +7117,14 @@ function exportActiveTabExcel() {
   if (tab === 'hourly') {
     _hourlyExportBlocks(R).forEach(b => blocks.push(b));
   }
+  if (tab === 'weekly') {
+    _weeklyExportBlocks().forEach(b => blocks.push(b));
+  }
 
   // Scrape all tables in the active tab container
   const container = document.getElementById('tab-' + tab);
   if (container) {
-    const tables = [...container.querySelectorAll('table.desktop-table, table.my-table')];
+    const tables = [...container.querySelectorAll('table.desktop-table:not([data-noexport]), table.my-table:not([data-noexport])')];
     tables.forEach((t, i) => {
       const scraped = _scrapeTable(t);
       if (scraped.rows.length) {
@@ -6737,6 +7437,83 @@ window.exportAllToExcel = exportAllToExcel;
 // INSIGHTS TAB — KPIs + Charts
 // =====================================================================
 
+// ============ 🎬 REVIEW (Year/Month in Review) ============
+window.setReviewMode = function(m) { STATE.reviewMode = m; renderActive(); };
+function _reviewBlock(R) {
+  const mode = STATE.reviewMode || 'year';
+  const now = new Date(LATEST + 'T12:00:00Z');
+  const yNow = now.getUTCFullYear(), mNow = now.getUTCMonth() + 1;
+  // Period bounds
+  let from, to, label, lyFrom, lyTo;
+  if (mode === 'month') {
+    from = yNow + '-' + String(mNow).padStart(2, '0') + '-01';
+    to = LATEST;
+    const MON = ['Ιανουαρίου','Φεβρουαρίου','Μαρτίου','Απριλίου','Μαΐου','Ιουνίου','Ιουλίου','Αυγούστου','Σεπτεμβρίου','Οκτωβρίου','Νοεμβρίου','Δεκεμβρίου'];
+    label = MON[mNow - 1] + ' ' + yNow + ' (MTD)';
+    lyFrom = (yNow - 1) + '-' + String(mNow).padStart(2, '0') + '-01';
+    lyTo = lyDate(to, '364');
+  } else {
+    from = yNow + '-01-01'; to = LATEST; label = yNow + ' (YTD)';
+    lyFrom = (yNow - 1) + '-01-01'; lyTo = lyDate(to, '364');
+  }
+  // Aggregate helper over a date span
+  function agg(f, t) {
+    let s = 0, tc = 0; const perStore = STORES.map(() => ({ s: 0, t: 0 }));
+    const d0 = new Date(f + 'T12:00:00Z'), d1 = new Date(t + 'T12:00:00Z');
+    for (let d = new Date(d0); d <= d1; d.setUTCDate(d.getUTCDate() + 1)) {
+      const ds = d.toISOString().slice(0, 10);
+      const a = dailyStore.get(ds); if (!a) continue;
+      for (let si = 0; si < STORES.length; si++) {
+        if (R.storeFilter && !R.storeFilter.has(si)) continue;
+        s += a[si].sales; tc += a[si].tcs; perStore[si].s += a[si].sales; perStore[si].t += a[si].tcs;
+      }
+    }
+    return { s, tc, perStore };
+  }
+  const cy = agg(from, to), ly = agg(lyFrom, lyTo);
+  const yoy = ly.s > 0 ? cy.s / ly.s - 1 : null;
+  const tcYoY = ly.tc > 0 ? cy.tc / ly.tc - 1 : null;
+  const avtYoY = (cy.tc > 0 && ly.tc > 0) ? (cy.s / cy.tc) / (ly.s / ly.tc) - 1 : null;
+  // Best store growth
+  const growth = [];
+  for (let si = 0; si < STORES.length; si++) {
+    if (R.storeFilter && !R.storeFilter.has(si)) continue;
+    if (cy.perStore[si].s <= 0) continue;
+    const g = ly.perStore[si].s > 0 ? cy.perStore[si].s / ly.perStore[si].s - 1 : null;
+    growth.push({ short: STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si], g, s: cy.perStore[si].s });
+  }
+  const topStore = growth.filter(x => x.g != null).sort((a, b) => b.g - a.g)[0];
+  const bigStore = growth.slice().sort((a, b) => b.s - a.s)[0];
+  // Best single day & week in period
+  let bestDay = null, wk = {};
+  const d0 = new Date(from + 'T12:00:00Z'), d1 = new Date(to + 'T12:00:00Z');
+  for (let d = new Date(d0); d <= d1; d.setUTCDate(d.getUTCDate() + 1)) {
+    const ds = d.toISOString().slice(0, 10); const a = dailyStore.get(ds); if (!a) continue;
+    let s = 0; for (let si = 0; si < STORES.length; si++) { if (R.storeFilter && !R.storeFilter.has(si)) continue; s += a[si].sales; }
+    if (s > 0 && (!bestDay || s > bestDay.v)) bestDay = { ds, v: s };
+    const iw = getISOWeek(ds), k = iw[0] + '-W' + String(iw[1]).padStart(2, '0'); wk[k] = (wk[k] || 0) + s;
+  }
+  let bestWk = null; Object.entries(wk).forEach(([k, v]) => { if (!bestWk || v > bestWk.v) bestWk = { k, v }; });
+  const nStores = growth.length;
+
+  // Narrative
+  const P = [];
+  const _filtered = R.storeFilter && R.storeFilter.size < STORES.length;
+  P.push('Το ' + label + ' η αλυσίδα' + (_filtered ? ' (φιλτραρισμένη)' : '') + ' πραγματοποίησε <strong>' + fmtEurK(cy.s) + '</strong> πωλήσεις με ' + fmtNum(cy.tc) + ' συναλλαγές' + (yoy != null ? ', ' + fmtPct(yoy) + ' vs την αντίστοιχη περίοδο πέρσι' : '') + '.');
+  if (tcYoY != null || avtYoY != null) P.push('Η επισκεψιμότητα κινήθηκε ' + (tcYoY != null ? fmtPct(tcYoY) : '—') + ' και το μέσο ticket ' + (avtYoY != null ? fmtPct(avtYoY) : '—') + '.');
+  if (topStore && topStore.g != null) P.push('Πρωταθλητής ανάπτυξης: <strong>' + topStore.short + '</strong> (' + fmtPct(topStore.g) + ' vs LY). Μεγαλύτερο σε τζίρο: <strong>' + bigStore.short + '</strong> (' + fmtEurK(bigStore.s) + ').');
+  if (bestDay) P.push('Καλύτερη μέρα: <strong>' + bestDay.ds + '</strong> με ' + fmtEurK(bestDay.v) + (holidayName(bestDay.ds) ? ' (' + holidayName(bestDay.ds) + ')' : '') + (bestWk ? ' · καλύτερη εβδομάδα ' + bestWk.k + ' (' + fmtEurK(bestWk.v) + ')' : '') + '.');
+  P.push('Στην περίοδο λειτούργησαν ' + nStores + ' καταστήματα.');
+
+  const btn = (m, lbl) => '<button class="trend-metric-chip ' + (mode === m ? 'active' : '') + '" onclick="window.setReviewMode(\'' + m + '\')">' + lbl + '</button>';
+  return '<div class="panel-section" id="reviewCard">' +
+    '<div class="section-title"><span>🎬 ' + (mode === 'month' ? 'Month in Review' : 'Year in Review') + '</span><span class="meta">' + label + ' · auto-narrative</span></div>' +
+    '<div style="margin-bottom:10px">' + btn('year', 'Έτος (YTD)') + btn('month', 'Μήνας (MTD)') + '</div>' +
+    '<div class="insight"><div class="ins-text" id="reviewText" style="line-height:1.7;font-size:13px">' + P.join(' ') + '</div></div>' +
+    '<button class="trend-metric-chip" style="margin-top:8px" onclick="navigator.clipboard.writeText(document.getElementById(\'reviewText\').innerText).then(()=>{this.textContent=\'✓ Αντιγράφηκε\';setTimeout(()=>this.textContent=\'📋 Αντιγραφή\',1500)})">📋 Αντιγραφή</button>' +
+    ' <button class="trend-metric-chip" style="margin-top:8px" onclick="window.print()">🖨 Εκτύπωση</button></div>';
+}
+
 function renderInsights(R) {
   const root = document.getElementById("tab-insights");
   if (!root) return;
@@ -6833,6 +7610,99 @@ function renderInsights(R) {
   
   html += '</div>';  // end insights-wrap
   
+
+  // ============ 🚨 ΗΜΕΡΟΛΟΓΙΟ ΑΠΟΚΛΙΣΕΩΝ (τελευταίες 13 εβδομάδες) ============
+  try {
+    const back = 91;
+    const anomalies = [];
+    for (let off = 0; off < back; off++) {
+      const d = new Date(LATEST + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - off);
+      const ds = d.toISOString().slice(0, 10);
+      const a = dailyStore.get(ds);
+      if (!a) continue;
+      for (let si = 0; si < STORES.length; si++) {
+        if (R.storeFilter && !R.storeFilter.has(si)) continue;
+        // expected = same-DOW avg of previous 4 weeks
+        let exp = 0, n = 0;
+        for (let k = 1; k <= 4; k++) {
+          const p = new Date(ds + 'T12:00:00Z'); p.setUTCDate(p.getUTCDate() - 7 * k);
+          const pa = dailyStore.get(p.toISOString().slice(0, 10));
+          if (pa && pa[si].sales > 0) { exp += pa[si].sales; n++; }
+        }
+        if (n < 3) continue;
+        exp /= n;
+        if (exp < 500) continue;
+        const act = a[si].sales;
+        const dev = act / exp - 1;
+        if (act <= 0 || dev < -0.2) {
+          anomalies.push({ ds, si, short: STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si], act, exp, dev: act <= 0 ? null : dev, hol: holidayName(ds) });
+        }
+      }
+    }
+    if (anomalies.length) {
+      anomalies.sort((a, b) => b.ds.localeCompare(a.ds));
+      const shown = anomalies.slice(0, 80);
+      html += '<div class="panel-section">' +
+        '<div class="section-title"><span>🚨 Ημερολόγιο Αποκλίσεων</span><span class="meta">μέρες με -20%+ vs αναμενόμενο (same-DOW avg 4 εβδ) · τελευταίες 13 εβδ · ' + anomalies.length + ' συμβάντα</span></div>' +
+        '<div style="overflow-x:auto;max-height:400px;overflow-y:auto"><table class="desktop-table" style="font-size:10px"><thead><tr>' +
+        '<th style="text-align:left">Ημερομηνία</th><th style="text-align:left">Store</th><th>Πωλήσεις</th><th>Αναμενόμενο</th><th>Δ</th><th></th></tr></thead><tbody>' +
+        shown.map(x => '<tr><td style="text-align:left">' + x.ds + '</td><td style="text-align:left"><strong>' + x.short + '</strong></td>' +
+          '<td>' + fmtEurK(x.act) + '</td><td>' + fmtEurK(x.exp) + '</td>' +
+          '<td style="font-weight:700;color:var(--bad)">' + (x.dev == null ? 'ΜΗΔΕΝ 🔴' : (x.dev * 100).toFixed(0) + '%') + '</td>' +
+          '<td style="font-size:9px">' + (x.hol ? '🎉 ' + x.hol : '') + '</td></tr>').join('') +
+        '</tbody></table></div>' +
+        (anomalies.length > 80 ? '<div style="font-size:10px;color:var(--text-2);padding-top:4px">Εμφανίζονται τα 80 πιο πρόσφατα.</div>' : '') + '</div>';
+    }
+  } catch (e) { /* additive */ }
+
+  // ============ 🏆 ΡΕΚΟΡ & MILESTONES ============
+  try {
+    const recRows = [];
+    const wkAggBest = {};  // si -> {key, val}
+    const bestDay = {};
+    dailyStore.forEach((arr, ds) => {
+      for (let si = 0; si < STORES.length; si++) {
+        const v = arr[si].sales;
+        if (v <= 0) continue;
+        if (!bestDay[si] || v > bestDay[si].v) bestDay[si] = { ds, v };
+        const iso = getISOWeek(ds);
+        const wkKey = iso[0] + '-W' + String(iso[1]).padStart(2, '0');
+        wkAggBest[si] = wkAggBest[si] || {};
+        wkAggBest[si][wkKey] = (wkAggBest[si][wkKey] || 0) + v;
+      }
+    });
+    const recent30 = (() => { const d = new Date(LATEST + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() - 30); return d.toISOString().slice(0, 10); })();
+    const curIsoK = (() => { const i = getISOWeek(LATEST); return i[0] + '-W' + String(i[1]).padStart(2, '0'); })();
+    for (let si = 0; si < STORES.length; si++) {
+      if (R.storeFilter && !R.storeFilter.has(si)) continue;
+      if (!bestDay[si]) continue;
+      let bw = null;
+      Object.entries(wkAggBest[si] || {}).forEach(([k, v]) => { if (k !== curIsoK && (!bw || v > bw.v)) bw = { k, v }; });
+      recRows.push({
+        short: STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si],
+        bd: bestDay[si], bw,
+        fresh: bestDay[si].ds >= recent30 || (bw && bw.k >= curIsoK.slice(0, 5) && false),
+      });
+    }
+    if (recRows.length) {
+      recRows.sort((a, b) => b.bd.v - a.bd.v);
+      const freshCount = recRows.filter(r => r.fresh).length;
+      html += '<div class="panel-section">' +
+        '<div class="section-title"><span>🏆 Ρεκόρ &amp; Milestones</span><span class="meta">all-time (στα διαθέσιμα δεδομένα) · 🔥 = ρεκόρ τις τελευταίες 30 ημέρες' + (freshCount ? ' · ' + freshCount + ' φρέσκα!' : '') + '</span></div>' +
+        '<div style="overflow-x:auto"><table class="desktop-table" style="font-size:10px"><thead><tr>' +
+        '<th style="text-align:left">Store</th><th>Καλύτερη μέρα</th><th>Πότε</th><th>Καλύτερη εβδομάδα</th><th>Ποια</th></tr></thead><tbody>' +
+        recRows.map(r => '<tr><td style="text-align:left"><strong>' + r.short + '</strong>' + (r.fresh ? ' 🔥' : '') + '</td>' +
+          '<td><strong>' + fmtEurK(r.bd.v) + '</strong></td><td>' + r.bd.ds + (holidayName(r.bd.ds) ? ' 🎉' : '') + '</td>' +
+          '<td>' + (r.bw ? fmtEurK(r.bw.v) : '—') + '</td><td>' + (r.bw ? r.bw.k : '—') + '</td></tr>').join('') +
+        '</tbody></table></div></div>';
+    }
+  } catch (e) { /* additive */ }
+
+  // ============ 🎬 YEAR / MONTH IN REVIEW (auto-narrative) ============
+  try {
+    html += _reviewBlock(R);
+  } catch (e) { /* additive */ }
+
   root.innerHTML = html;
   
   // Render the charts AFTER innerHTML is set
