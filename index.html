@@ -1450,6 +1450,65 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
 .hour-delta.neg .h-pct { color: var(--bad); }
 .hour-delta.flat .h-pct { color: var(--text-2); }
 
+
+/* ===== PRINT: isolate a single card ===== */
+#__printHost { display: none; }
+.print-head { display: none; }
+@media print {
+  body.printing-card * { visibility: hidden !important; }
+  body.printing-card #__printHost,
+  body.printing-card #__printHost * { visibility: visible !important; }
+  body.printing-card #__printHost {
+    display: block !important;
+    position: absolute; left: 0; top: 0; width: 100%;
+    padding: 18px; background: #fff; color: #111;
+  }
+  body.printing-card #__printHost .print-head {
+    display: block !important; font-size: 12px; font-weight: 700;
+    color: #666; border-bottom: 1px solid #ccc; padding-bottom: 8px; margin-bottom: 14px;
+  }
+  body.printing-card #__printHost .panel-section {
+    background: #fff !important; border: none !important; box-shadow: none !important;
+  }
+  body.printing-card #__printHost .section-title span,
+  body.printing-card #__printHost .ins-text,
+  body.printing-card #__printHost div { color: #111 !important; }
+  body.printing-card #__printHost .insight { background: #f5f5f5 !important; border: 1px solid #ddd !important; }
+  body.printing-card #__printHost [style*="background:var(--bg-2)"],
+  body.printing-card #__printHost [style*="background: var(--bg-2)"] { background: #f5f5f5 !important; }
+  @page { margin: 12mm; }
+}
+
+/* ===== Store One-Pagers ===== */
+#__onePagerHost { display: none; }
+body.printing-onepagers #__onePagerHost {
+  display: block; position: fixed; inset: 0; z-index: 99999;
+  background: #f0f0f0; overflow-y: auto; padding: 20px;
+}
+body.printing-onepagers > *:not(#__onePagerHost) { display: none !important; }
+.op-toolbar {
+  position: sticky; top: -20px; background: #222; color: #fff; padding: 12px 18px;
+  border-radius: 8px; margin-bottom: 18px; display: flex; gap: 14px; align-items: center;
+  box-shadow: 0 2px 10px rgba(0,0,0,.3);
+}
+.op-toolbar button {
+  background: #dc2626; color: #fff; border: none; padding: 8px 16px;
+  border-radius: 6px; cursor: pointer; font-size: 13px; font-weight: 600;
+}
+.op-toolbar button:last-child { background: #555; }
+.op-page {
+  background: #fff; color: #111; width: 210mm; min-height: 148mm; max-width: 100%;
+  margin: 0 auto 18px; padding: 22px 26px; border-radius: 8px; box-sizing: border-box;
+  box-shadow: 0 2px 12px rgba(0,0,0,.15); font-family: -apple-system, sans-serif;
+}
+.op-head { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #dc2626; padding-bottom: 10px; }
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+  body.printing-onepagers #__onePagerHost { position: static; background: #fff; padding: 0; }
+  .op-toolbar { display: none !important; }
+  .op-page { box-shadow: none; margin: 0; page-break-after: always; width: 100%; min-height: 0; border-radius: 0; padding: 10px 14px; }
+  .op-page:last-child { page-break-after: auto; }
+}
 </style>
 
 </head>
@@ -1501,6 +1560,8 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
         <a href="food/">Food Cost</a>
       </div>
       <button id="exportPptxBtn" class="btn-export-all" title="PowerPoint με τα τρέχοντα φίλτρα (περίοδος, stores, maturity)" onclick="window.exportFullPPTX()">↓ PPT</button>
+      <button id="rgmPackBtn" class="btn-export-all" title="RGM Meeting Pack: PowerPoint με Ops + Marketing slides και auto-narrative" onclick="window.exportRGMPack()">📊 RGM Pack</button>
+      <button id="rgmOnePagerBtn" class="btn-export-all" title="Μία σελίδα ανά κατάστημα (Print → Save as PDF)" onclick="window.openStoreOnePagers()">📄 Store 1-pagers</button>
       <button id="exportTabBtn" class="btn-export-all" title="Εξάγει το τρέχον tab όπως το βλέπεις (πίνακες + charts) σε Excel" onclick="exportActiveTabExcel()">↓ Excel (tab)</button>
       <button id="exportAllBtn" class="btn-export-all" title="Εξάγει όλα τα tabs σε ένα Excel αρχείο" onclick="exportAllToExcel()">↓ Export All</button>
     </div>
@@ -4463,7 +4524,7 @@ function renderStoreDeep(R) {
         pts.map(p => p ? '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="2" fill="var(--kfc)"/>' : '').join('') + '</svg>';
     }
 
-    html += '<div class="panel-section" id="scorecardCard">' +
+    html += '<div class="panel-section print-card" id="scorecardCard">' +
       '<div class="section-title"><span>📋 Scorecard — ' + short + '</span><span class="meta">' + (meta.store_type || '') + (meta.opening_date ? ' · άνοιγμα ' + meta.opening_date : '') + ' · ' + R.from + ' → ' + R.to + '</span></div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:12px">' +
       chip('Πωλήσεις vs LY', '<span style="color:' + pcColor(scYoY) + '">' + pc(scYoY) + '</span>', pcColor(scYoY)) +
@@ -4479,7 +4540,7 @@ function renderStoreDeep(R) {
       '</div>' +
       (sparkSvg ? '<div style="padding:10px 12px;background:var(--bg-2);border-radius:8px;margin-bottom:6px"><div style="font-size:9px;color:var(--text-2);text-transform:uppercase;letter-spacing:1px;font-family:var(--mono);margin-bottom:4px">YoY% τελευταίες 8 εβδομάδες</div>' + sparkSvg + '</div>' : '') +
       '<div style="font-size:10px;color:var(--text-2);font-family:var(--mono);padding-top:4px">' + (bestDay ? 'Καλύτερη μέρα: ' + bestDay.ds + ' (' + fmtEurK(bestDay.v) + ')' : '') + (bestWk ? ' · Καλύτερη εβδομάδα: ' + bestWk.k + ' (' + fmtEurK(bestWk.v) + ')' : '') + '</div>' +
-      '<button class="trend-metric-chip" style="margin-top:10px" onclick="window.print()">🖨 Εκτύπωση Scorecard</button>' +
+      '<button class="trend-metric-chip no-print" style="margin-top:10px" onclick="window.printCard(\'scorecardCard\')">🖨 Εκτύπωση Scorecard</button>' +
       '</div>';
   } catch (e) { /* scorecard additive */ }
 
@@ -7437,6 +7498,28 @@ window.exportAllToExcel = exportAllToExcel;
 // INSIGHTS TAB — KPIs + Charts
 // =====================================================================
 
+// ============ 🖨 PRINT ένα μεμονωμένο card καθαρά ============
+window.printCard = function(cardId) {
+  const card = document.getElementById(cardId);
+  if (!card) { window.print(); return; }
+  const clone = card.cloneNode(true);
+  // αφαίρεσε τα κουμπιά (no-print) από το αντίγραφο
+  clone.querySelectorAll('.no-print, button').forEach(b => b.remove());
+  let host = document.getElementById('__printHost');
+  if (!host) {
+    host = document.createElement('div');
+    host.id = '__printHost';
+    document.body.appendChild(host);
+  }
+  const brand = (typeof document !== 'undefined' && document.title.includes('Taco')) ? 'Taco Bell Greece' : 'KFC Greece';
+  host.innerHTML = '<div class="print-head">' + brand + ' · ' + new Date().toLocaleDateString('el-GR') + '</div>';
+  host.appendChild(clone);
+  document.body.classList.add('printing-card');
+  const done = () => { document.body.classList.remove('printing-card'); host.innerHTML = ''; window.removeEventListener('afterprint', done); };
+  window.addEventListener('afterprint', done);
+  setTimeout(() => window.print(), 60);
+};
+
 // ============ 🎬 REVIEW (Year/Month in Review) ============
 window.setReviewMode = function(m) { STATE.reviewMode = m; renderActive(); };
 function _reviewBlock(R) {
@@ -7452,6 +7535,11 @@ function _reviewBlock(R) {
     label = MON[mNow - 1] + ' ' + yNow + ' (MTD)';
     lyFrom = (yNow - 1) + '-' + String(mNow).padStart(2, '0') + '-01';
     lyTo = lyDate(to, '364');
+  } else if (mode === 'period') {
+    from = R.from; to = R.to;
+    lyFrom = lyDate(R.from, STATE.ly_mode || '364');
+    lyTo = lyDate(R.to, STATE.ly_mode || '364');
+    label = R.from + ' → ' + R.to + ' (επιλεγμένη περίοδος)';
   } else {
     from = yNow + '-01-01'; to = LATEST; label = yNow + ' (YTD)';
     lyFrom = (yNow - 1) + '-01-01'; lyTo = lyDate(to, '364');
@@ -7506,12 +7594,13 @@ function _reviewBlock(R) {
   P.push('Στην περίοδο λειτούργησαν ' + nStores + ' καταστήματα.');
 
   const btn = (m, lbl) => '<button class="trend-metric-chip ' + (mode === m ? 'active' : '') + '" onclick="window.setReviewMode(\'' + m + '\')">' + lbl + '</button>';
-  return '<div class="panel-section" id="reviewCard">' +
+  return '<div class="panel-section print-card" id="reviewCard">' +
     '<div class="section-title"><span>🎬 ' + (mode === 'month' ? 'Month in Review' : 'Year in Review') + '</span><span class="meta">' + label + ' · auto-narrative</span></div>' +
-    '<div style="margin-bottom:10px">' + btn('year', 'Έτος (YTD)') + btn('month', 'Μήνας (MTD)') + '</div>' +
+    '<div style="margin-bottom:10px">' + btn('year', 'Έτος (YTD)') + btn('month', 'Μήνας (MTD)') + btn('period', 'Επιλεγμένη περίοδος') + '</div>' +
+    (_filtered ? '<div style="font-size:10px;color:var(--text-2);font-family:var(--mono);margin-bottom:8px">📍 Εφαρμόζεται το φίλτρο καταστημάτων από πάνω (' + R.storeFilter.size + '/' + STORES.length + ' stores)</div>' : '') +
     '<div class="insight"><div class="ins-text" id="reviewText" style="line-height:1.7;font-size:13px">' + P.join(' ') + '</div></div>' +
     '<button class="trend-metric-chip" style="margin-top:8px" onclick="navigator.clipboard.writeText(document.getElementById(\'reviewText\').innerText).then(()=>{this.textContent=\'✓ Αντιγράφηκε\';setTimeout(()=>this.textContent=\'📋 Αντιγραφή\',1500)})">📋 Αντιγραφή</button>' +
-    ' <button class="trend-metric-chip" style="margin-top:8px" onclick="window.print()">🖨 Εκτύπωση</button></div>';
+    ' <button class="trend-metric-chip no-print" style="margin-top:8px" onclick="window.printCard(\'reviewCard\')">🖨 Εκτύπωση</button></div>';
 }
 
 function renderInsights(R) {
@@ -9478,6 +9567,368 @@ function describeActiveFilters() {
   return parts.join('  ·  ');
 }
 
+// =====================================================================
+// =====================================================================
+// 📄 STORE ONE-PAGERS — μία σελίδα ανά κατάστημα (Print → Save as PDF)
+// =====================================================================
+function openStoreOnePagers() {
+  try {
+    const R = compute();
+    const sf = R.storeFilter;
+    const brand = document.title.includes('Taco') ? 'Taco Bell Greece' : 'KFC Greece';
+    const today = new Date().toLocaleDateString('el-GR');
+    const eur = v => v == null ? '—' : (v >= 1e6 ? (v / 1e6).toFixed(2).replace('.', ',') + 'M€' : Math.round(v / 1e3) + 'K€');
+    const pc = v => v == null ? '—' : (v >= 0 ? '+' : '') + (v * 100).toFixed(1).replace('.', ',') + '%';
+    const pcColor = v => v == null ? '#888' : v >= 0 ? '#16a34a' : '#dc2626';
+    const isoNow = getISOWeek(LATEST);
+
+    let pages = '';
+    let count = 0;
+    // rank stores by sales for consistent order
+    const order = [];
+    for (let si = 0; si < STORES.length; si++) {
+      if (sf && !sf.has(si)) continue;
+      const cy = R.cy.byStore[si];
+      if (!cy || cy.sales <= 0) continue;
+      order.push({ si, s: cy.sales });
+    }
+    order.sort((a, b) => b.s - a.s);
+
+    order.forEach(({ si }) => {
+      const cy = R.cy.byStore[si], ly = R.ly.byStore[si], b = R.budget.byStore[si];
+      const short = STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si];
+      const meta = STORE_META[STORES[si]] || {};
+      const yoy = ly && ly.sales > 0 ? cy.sales / ly.sales - 1 : null;
+      const vsB = b && b.sales > 0 ? cy.sales / b.sales - 1 : null;
+      const tcYoY = ly && ly.tcs > 0 ? cy.tcs / ly.tcs - 1 : null;
+      const cyAvg = cy.tcs > 0 ? cy.sales / cy.tcs : null;
+      const lyAvg = ly && ly.tcs > 0 ? ly.sales / ly.tcs : null;
+      const avtYoY = (cyAvg && lyAvg) ? cyAvg / lyAvg - 1 : null;
+
+      // 8-week YoY sparkline
+      const spark = [];
+      for (let k = 7; k >= 0; k--) {
+        const w = isoNow[1] - k; if (w < 1) { spark.push(null); continue; }
+        const monCY = isoWeekMonday(isoNow[0], w), monLY = isoWeekMonday(isoNow[0] - 1, w);
+        const isCur = k === 0;
+        const nd = isCur ? (Math.round((new Date(LATEST + 'T12:00:00Z') - new Date(monCY + 'T12:00:00Z')) / 86400000) + 1) : 7;
+        let cs = 0, ls = 0;
+        for (let d = 0; d < nd; d++) { const aC = dailyStore.get(_wAddDays(monCY, d)), aL = dailyStore.get(_wAddDays(monLY, d)); if (aC) cs += aC[si].sales; if (aL) ls += aL[si].sales; }
+        spark.push(ls > 0 ? cs / ls - 1 : null);
+      }
+      const spVals = spark.filter(v => v != null);
+      let sparkSvg = '';
+      if (spVals.length > 2) {
+        const mn = Math.min(...spVals), mx = Math.max(...spVals), rg = (mx - mn) || 0.01;
+        const W = 520, H = 90;
+        const pts = spark.map((v, i) => v == null ? null : [10 + i / 7 * (W - 20), H - 12 - (v - mn) / rg * (H - 24)]);
+        let d = '', up = true;
+        pts.forEach(p => { if (!p) { up = true; return; } d += (up ? 'M' : 'L') + p[0].toFixed(1) + ',' + p[1].toFixed(1) + ' '; up = false; });
+        const zeroY = mn < 0 && mx > 0 ? H - 12 - (0 - mn) / rg * (H - 24) : null;
+        sparkSvg = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:90px">' +
+          (zeroY != null ? '<line x1="10" y1="' + zeroY.toFixed(1) + '" x2="' + (W - 10) + '" y2="' + zeroY.toFixed(1) + '" stroke="#ccc" stroke-dasharray="3 3"/>' : '') +
+          '<path fill="none" stroke="#dc2626" stroke-width="2.5" d="' + d.trim() + '"/>' +
+          pts.map((p, i) => p ? '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="3" fill="#dc2626"/><text x="' + p[0].toFixed(1) + '" y="' + (p[1] - 8).toFixed(1) + '" font-size="10" fill="#555" text-anchor="middle">' + pc(spark[i]) + '</text>' : '').join('') + '</svg>';
+      }
+
+      // Best day
+      let bestDay = null;
+      dailyStore.forEach((arr, ds) => { const v = arr[si].sales; if (v > 0 && (!bestDay || v > bestDay.v)) bestDay = { ds, v }; });
+
+      const kpiBox = (label, val, col) => '<div style="flex:1;min-width:110px;border:1px solid #ddd;border-radius:8px;padding:10px 12px"><div style="font-size:10px;color:#777;text-transform:uppercase;letter-spacing:.5px">' + label + '</div><div style="font-size:22px;font-weight:700;color:' + (col || '#111') + ';margin-top:2px">' + val + '</div></div>';
+
+      pages += '<div class="op-page">' +
+        '<div class="op-head"><div><span style="font-size:22px;font-weight:800">' + short + '</span> <span style="color:#888;font-size:13px">' + (meta.store_type || '') + '</span></div>' +
+        '<div style="text-align:right;font-size:11px;color:#777">' + brand + '<br>' + R.from + ' → ' + R.to + '</div></div>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap;margin:14px 0">' +
+        kpiBox('Πωλήσεις', eur(cy.sales), '#111') +
+        kpiBox('vs LY', pc(yoy), pcColor(yoy)) +
+        kpiBox('vs Budget', pc(vsB), pcColor(vsB)) +
+        kpiBox('Συναλλαγές', (cy.tcs / 1000).toFixed(1) + 'K', '#111') +
+        kpiBox('TCs vs LY', pc(tcYoY), pcColor(tcYoY)) +
+        kpiBox('Ticket', cyAvg ? cyAvg.toFixed(2).replace('.', ',') + '€' : '—', '#111') +
+        kpiBox('Ticket vs LY', pc(avtYoY), pcColor(avtYoY)) +
+        '</div>' +
+        (sparkSvg ? '<div style="margin:10px 0"><div style="font-size:11px;color:#777;text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">YoY% τελευταίες 8 εβδομάδες</div>' + sparkSvg + '</div>' : '') +
+        '<div style="font-size:12px;color:#555;margin-top:14px;border-top:1px solid #eee;padding-top:10px">' +
+        (bestDay ? '🏆 Καλύτερη μέρα: <strong>' + bestDay.ds + '</strong> (' + eur(bestDay.v) + ')' : '') +
+        (meta.opening_date ? '  ·  Άνοιγμα: ' + meta.opening_date : '') +
+        '</div>' +
+        '<div style="margin-top:20px;border-top:1px solid #eee;padding-top:12px"><div style="font-size:11px;color:#999">Σημειώσεις RGM:</div><div style="height:70px;border:1px dashed #ccc;border-radius:6px;margin-top:6px"></div></div>' +
+        '</div>';
+      count++;
+    });
+
+    let host = document.getElementById('__onePagerHost');
+    if (!host) { host = document.createElement('div'); host.id = '__onePagerHost'; document.body.appendChild(host); }
+    host.innerHTML = '<div class="op-toolbar no-print"><span>📄 ' + count + ' one-pagers έτοιμα</span>' +
+      '<button onclick="window.print()">🖨 Print / Save as PDF</button>' +
+      '<button onclick="document.getElementById(\'__onePagerHost\').innerHTML=\'\';document.body.classList.remove(\'printing-onepagers\')">✕ Κλείσιμο</button></div>' + pages;
+    document.body.classList.add('printing-onepagers');
+    window.scrollTo(0, 0);
+  } catch (e) {
+    alert('Σφάλμα one-pagers: ' + e.message);
+    console.error(e);
+  }
+}
+
+// 📊 RGM MEETING PACK — PPTX (Ops + Marketing slides + auto-narrative)
+// =====================================================================
+function _rgmComputeData() {
+  const R = compute();
+  const sf = R.storeFilter;
+  const inScope = si => !sf || sf.has(si);
+
+  // Per-store CY/LY/Budget
+  const stores = [];
+  for (let si = 0; si < STORES.length; si++) {
+    if (!inScope(si)) continue;
+    const cy = R.cy.byStore[si], ly = R.ly.byStore[si], b = R.budget.byStore[si];
+    if (cy.sales <= 0 && ly.sales <= 0) continue;
+    stores.push({
+      si, short: STORE_META[STORES[si]] ? STORE_META[STORES[si]].short : STORES[si],
+      type: (typeof wkStoreType === 'function') ? wkStoreType(si) : null,
+      cyS: cy.sales, cyT: cy.tcs, lyS: ly.sales, lyT: ly.tcs, bS: b ? b.sales : 0,
+      yoy: ly.sales > 0 ? cy.sales / ly.sales - 1 : null,
+      vsB: (b && b.sales > 0) ? cy.sales / b.sales - 1 : null,
+      cyAvg: cy.tcs > 0 ? cy.sales / cy.tcs : null,
+      lyAvg: ly.tcs > 0 ? ly.sales / ly.tcs : null,
+      tcYoY: ly.tcs > 0 ? cy.tcs / ly.tcs - 1 : null,
+    });
+  }
+  // Momentum (last 4 full ISO weeks vs prev 4) — reuse weekly logic
+  const isoNow = getISOWeek(LATEST);
+  const curW = isoNow[1];
+  function storeWkSales(si, wFrom, wTo) {
+    let cs = 0, ls = 0;
+    for (let w = wFrom; w <= wTo; w++) {
+      if (w < 1) continue;
+      const monCY = isoWeekMonday(isoNow[0], w), monLY = isoWeekMonday(isoNow[0] - 1, w);
+      for (let d = 0; d < 7; d++) {
+        const aC = dailyStore.get(_wAddDays(monCY, d)), aL = dailyStore.get(_wAddDays(monLY, d));
+        if (aC) cs += aC[si].sales; if (aL) ls += aL[si].sales;
+      }
+    }
+    return { cs, ls };
+  }
+  stores.forEach(st => {
+    const rec = storeWkSales(st.si, curW - 4, curW - 1);
+    const prev = storeWkSales(st.si, curW - 8, curW - 5);
+    const yRec = rec.ls > 0 ? rec.cs / rec.ls - 1 : null;
+    const yPrev = prev.ls > 0 ? prev.cs / prev.ls - 1 : null;
+    st.momentum = (yRec != null && yPrev != null) ? yRec - yPrev : null;
+    // streak
+    let streak = 0;
+    for (let w = curW - 1; w >= curW - 12; w--) {
+      if (w < 1) break;
+      const monCY = isoWeekMonday(isoNow[0], w), monLY = isoWeekMonday(isoNow[0] - 1, w);
+      let cs = 0, ls = 0;
+      for (let d = 0; d < 7; d++) {
+        const aC = dailyStore.get(_wAddDays(monCY, d)), aL = dailyStore.get(_wAddDays(monLY, d));
+        if (aC) cs += aC[st.si].sales; if (aL) ls += aL[st.si].sales;
+      }
+      const y = ls > 0 && cs > 0 ? cs / ls - 1 : null;
+      if (y == null) break;
+      if (streak === 0) streak = y >= 0 ? 1 : -1;
+      else if (streak > 0 && y >= 0) streak++;
+      else if (streak < 0 && y < 0) streak--;
+      else break;
+    }
+    st.streak = streak;
+  });
+
+  // Channel mix + aggregators (period)
+  const aggIdx = new Set(); CHANNELS.forEach((n, ci) => { if (/E-?\s*FOOD|WOLT|BOX/i.test(n)) aggIdx.add(ci); });
+  const chTot = CHANNELS.map(() => 0);
+  let aggTot = 0, chGrand = 0;
+  const perStoreAgg = {};
+  REC_CH.forEach(r => {
+    if (r[0] < R.from || r[0] > R.to || !inScope(r[1])) return;
+    chTot[r[2]] += r[3]; chGrand += r[3];
+    if (aggIdx.has(r[2])) { aggTot += r[3]; perStoreAgg[r[1]] = (perStoreAgg[r[1]] || 0) + r[3]; }
+  });
+
+  return { R, stores, chTot, aggTot, chGrand, perStoreAgg, aggIdx };
+}
+
+function exportRGMPack() {
+  const btn = document.getElementById('rgmPackBtn');
+  try {
+    if (typeof PptxGenJS === 'undefined') { alert('Η βιβλιοθήκη PowerPoint δεν φορτώθηκε.'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = '⏳...'; }
+    const D = _rgmComputeData();
+    const R = D.R;
+    const pptx = new PptxGenJS();
+    pptx.defineLayout({ name: 'WIDE', width: 13.33, height: 7.5 });
+    pptx.layout = 'WIDE';
+    const BG = PPT_THEME.bg, TX = PPT_THEME.text, DIM = PPT_THEME.textDim, ACC = PPT_THEME.red;
+    const brand = document.title.includes('Taco') ? 'TACO BELL GREECE' : 'KFC GREECE';
+    const today = new Date().toLocaleDateString('el-GR');
+    const period = R.from + ' → ' + R.to;
+    const pc = v => v == null ? '—' : (v >= 0 ? '+' : '') + (v * 100).toFixed(1) + '%';
+    const eur = v => v >= 1e6 ? (v / 1e6).toFixed(2).replace('.', ',') + 'M€' : Math.round(v / 1e3) + 'K€';
+
+    // Totals
+    let cyS = 0, cyT = 0, lyS = 0, lyT = 0, bS = 0;
+    D.stores.forEach(s => { cyS += s.cyS; cyT += s.cyT; lyS += s.lyS; lyT += s.lyT; bS += s.bS; });
+    const yoy = lyS > 0 ? cyS / lyS - 1 : null;
+    const vsB = bS > 0 ? cyS / bS - 1 : null;
+    const tcYoY = lyT > 0 ? cyT / lyT - 1 : null;
+    const avt = cyT > 0 ? cyS / cyT : 0, lyAvt = lyT > 0 ? lyS / lyT : 0;
+    const avtYoY = lyAvt > 0 ? avt / lyAvt - 1 : null;
+
+    const slideHead = (s, title, sub) => {
+      s.background = { color: BG };
+      s.addText(title, { x: 0.5, y: 0.3, w: 12.3, h: 0.6, fontSize: 24, bold: true, color: TX });
+      s.addText(sub || (period + '  ·  ' + brand), { x: 0.5, y: 0.92, w: 12.3, h: 0.35, fontSize: 11, color: DIM });
+    };
+    const narrate = (s, lines, y) => {
+      s.addText('🗣 Μπούσουλας ομιλητή', { x: 0.5, y: y, w: 12.3, h: 0.3, fontSize: 11, bold: true, color: PPT_THEME.amber });
+      s.addText(lines.map(t => ({ text: t, options: { bullet: true, color: TX, fontSize: 11, paraSpaceAfter: 4 } })),
+        { x: 0.6, y: y + 0.32, w: 12.2, h: 1.4 });
+    };
+
+    // ---------- SLIDE 1: Title ----------
+    let s = pptx.addSlide(); s.background = { color: BG };
+    s.addText(brand, { x: 0.6, y: 1.7, w: 12, h: 0.9, fontSize: 40, bold: true, color: ACC });
+    s.addText('RGM Meeting Pack', { x: 0.6, y: 2.65, w: 12, h: 0.7, fontSize: 30, color: TX });
+    s.addText(period, { x: 0.6, y: 3.5, w: 12, h: 0.5, fontSize: 20, color: TX });
+    s.addText('Δημιουργήθηκε: ' + today, { x: 0.6, y: 4.15, w: 12, h: 0.4, fontSize: 12, color: DIM });
+
+    // ---------- SLIDE 2: Chain Scorecard ----------
+    s = pptx.addSlide(); slideHead(s, '📌 Chain Scorecard');
+    const kpi = (x, label, val, sub, col) => {
+      s.addShape(pptx.ShapeType.rect, { x, y: 1.5, w: 2.9, h: 1.7, fill: { color: PPT_THEME.card }, line: { color: PPT_THEME.border, width: 1 } });
+      s.addText(label, { x: x + 0.15, y: 1.65, w: 2.6, h: 0.35, fontSize: 11, color: DIM });
+      s.addText(val, { x: x + 0.15, y: 2.05, w: 2.6, h: 0.6, fontSize: 26, bold: true, color: col || TX });
+      s.addText(sub, { x: x + 0.15, y: 2.7, w: 2.6, h: 0.4, fontSize: 11, color: DIM });
+    };
+    kpi(0.5, 'Πωλήσεις', eur(cyS), 'vs LY ' + pc(yoy), yoy >= 0 ? PPT_THEME.green : PPT_THEME.redNeg);
+    kpi(3.6, 'vs Budget', pc(vsB), 'budget ' + eur(bS), vsB >= 0 ? PPT_THEME.green : PPT_THEME.redNeg);
+    kpi(6.7, 'Συναλλαγές', (cyT / 1000).toFixed(0) + 'K', 'vs LY ' + pc(tcYoY), tcYoY >= 0 ? PPT_THEME.green : PPT_THEME.redNeg);
+    kpi(9.8, 'Μέσο Ticket', avt.toFixed(2).replace('.', ',') + '€', 'vs LY ' + pc(avtYoY), avtYoY >= 0 ? PPT_THEME.green : PPT_THEME.redNeg);
+    narrate(s, [
+      'Ο μήνας έκλεισε στα ' + eur(cyS) + ', ' + pc(yoy) + ' vs πέρσι και ' + pc(vsB) + ' vs budget.',
+      'Η κίνηση (' + pc(tcYoY) + ' TCs) ' + (tcYoY >= 0 ? 'στηρίζει' : 'πιέζει') + ' την εικόνα· το ticket ' + pc(avtYoY) + '.',
+      (avtYoY != null && tcYoY != null && avtYoY > 0 && tcYoY < 0) ? 'Η ανάπτυξη έρχεται από ακριβότερο καλάθι, όχι από περισσότερους πελάτες — προσοχή στο traffic.' :
+      (tcYoY != null && tcYoY > 0 && avtYoY != null && avtYoY < 0) ? 'Περισσότεροι πελάτες με μικρότερο καλάθι — δουλεύουν οι προσφορές, αλλά πιέζεται το ticket.' :
+      'Ισορροπημένη εικόνα traffic/ticket.',
+    ], 3.6);
+
+    // ---------- SLIDE 3: League Table ----------
+    s = pptx.addSlide(); slideHead(s, '🏆 League Table — κατάταξη καταστημάτων');
+    const ranked = D.stores.slice().sort((a, b) => (b.yoy ?? -9) - (a.yoy ?? -9));
+    const rows = [pptHead(['#', 'Store', 'Πωλήσεις', 'vs LY', 'vs Budget', 'Ticket', 'Ticket vs LY'])];
+    ranked.forEach((st, i) => {
+      rows.push([
+        pptName(String(i + 1)), pptName(st.short), pptNum(eur(st.cyS)),
+        pptPct(st.yoy), pptPct(st.vsB), pptNum(st.cyAvg ? st.cyAvg.toFixed(2).replace('.', ',') + '€' : '—'),
+        pptPct(st.lyAvg && st.cyAvg ? st.cyAvg / st.lyAvg - 1 : null),
+      ]);
+    });
+    s.addTable(rows, { x: 0.4, y: 1.3, w: 12.5, colW: [0.6, 3.2, 1.9, 1.6, 1.7, 1.7, 1.8], border: { type: 'solid', color: PPT_THEME.border, pt: 0.5 }, fontSize: 9, rowH: 0.26, valign: 'middle' });
+
+    // ---------- SLIDE 4: Movers ----------
+    s = pptx.addSlide(); slideHead(s, '📈 Movers — momentum τελευταίων 4 εβδομάδων');
+    const withMom = D.stores.filter(x => x.momentum != null).sort((a, b) => b.momentum - a.momentum);
+    const up = withMom.slice(0, 3), down = withMom.slice(-3).reverse();
+    s.addText('🟢 Ανεβαίνουν', { x: 0.5, y: 1.35, w: 5.8, h: 0.4, fontSize: 15, bold: true, color: PPT_THEME.green });
+    s.addText(up.map(x => ({ text: x.short + '   ' + pc(x.momentum) + ' βελτίωση YoY', options: { bullet: true, color: TX, fontSize: 14, paraSpaceAfter: 8 } })), { x: 0.7, y: 1.8, w: 5.6, h: 2.2 });
+    s.addText('🔴 Χάνουν momentum', { x: 6.8, y: 1.35, w: 5.8, h: 0.4, fontSize: 15, bold: true, color: PPT_THEME.redNeg });
+    s.addText(down.map(x => ({ text: x.short + '   ' + pc(x.momentum) + ' επιδείνωση YoY', options: { bullet: true, color: TX, fontSize: 14, paraSpaceAfter: 8 } })), { x: 7.0, y: 1.8, w: 5.6, h: 2.2 });
+    narrate(s, [
+      up.length ? ('Ισχυρότερη ανάκαμψη: ' + up[0].short + ' (' + pc(up[0].momentum) + ').') : 'Δεν υπάρχει σαφής ανάκαμψη.',
+      down.length ? ('Χρειάζεται προσοχή: ' + down[0].short + ' (' + pc(down[0].momentum) + ') — θέμα συζήτησης με τον RGM.') : '',
+    ].filter(Boolean), 4.4);
+
+    // ---------- SLIDE 5: Peer performance ----------
+    s = pptx.addSlide(); slideHead(s, '👥 Peer Performance — vs ομάδα');
+    const bySize = D.stores.slice().sort((a, b) => b.cyS - a.cyS);
+    const third = Math.ceil(bySize.length / 3);
+    const groups = [['🥇 Μεγάλα', bySize.slice(0, third)], ['🥈 Μεσαία', bySize.slice(third, third * 2)], ['🥉 Μικρά', bySize.slice(third * 2)]];
+    let gx = 0.4;
+    groups.forEach(([gname, grp]) => {
+      const withY = grp.filter(x => x.yoy != null);
+      let gs = 0, gl = 0; withY.forEach(x => { gs += x.cyS; gl += x.lyS; });
+      const gAvg = gl > 0 ? gs / gl - 1 : null;
+      s.addText(gname + '  (' + pc(gAvg) + ')', { x: gx, y: 1.35, w: 4.1, h: 0.4, fontSize: 13, bold: true, color: TX });
+      const gr = [pptHead(['Store', 'vs LY', 'vs ομάδα'])];
+      withY.sort((a, b) => b.yoy - a.yoy).forEach(x => {
+        const dG = gAvg != null ? x.yoy - gAvg : null;
+        gr.push([pptName(x.short), pptPct(x.yoy), { text: dG != null ? (dG >= 0 ? '+' : '') + (dG * 100).toFixed(1) + 'μ' : '—', options: { color: dG >= 0 ? PPT_THEME.green : PPT_THEME.redNeg, bold: true, align: 'right', fontSize: 9 } }]);
+      });
+      s.addTable(gr, { x: gx, y: 1.8, w: 4.1, colW: [2.1, 1.0, 1.0], border: { type: 'solid', color: PPT_THEME.border, pt: 0.5 }, fontSize: 9, rowH: 0.25 });
+      gx += 4.3;
+    });
+
+    // ---------- SLIDE 6: Channel Mix & Aggregators (Marketing) ----------
+    s = pptx.addSlide(); slideHead(s, '🛵 Channel Mix & Aggregator Dependency', period + '  ·  Marketing');
+    const chData = CHANNELS.map((n, ci) => ({ n, v: D.chTot[ci], sh: D.chGrand > 0 ? D.chTot[ci] / D.chGrand : 0 })).filter(x => x.v > 0).sort((a, b) => b.v - a.v);
+    const chRows = [pptHead(['Κανάλι', 'Πωλήσεις', 'Mix %'])];
+    chData.forEach(x => chRows.push([pptName(x.n), pptNum(eur(x.v)), pptNum((x.sh * 100).toFixed(1) + '%')]));
+    s.addTable(chRows, { x: 0.5, y: 1.4, w: 5.6, colW: [2.6, 1.6, 1.4], border: { type: 'solid', color: PPT_THEME.border, pt: 0.5 }, fontSize: 10, rowH: 0.3 });
+    const aggShare = D.chGrand > 0 ? D.aggTot / D.chGrand : 0;
+    s.addShape(pptx.ShapeType.rect, { x: 6.8, y: 1.5, w: 6, h: 1.3, fill: { color: PPT_THEME.card }, line: { color: PPT_THEME.border, width: 1 } });
+    s.addText('Εξάρτηση Aggregators (E-FOOD/WOLT/BOX)', { x: 7.0, y: 1.65, w: 5.6, h: 0.4, fontSize: 12, color: DIM });
+    s.addText((aggShare * 100).toFixed(1) + '%', { x: 7.0, y: 2.05, w: 5.6, h: 0.65, fontSize: 30, bold: true, color: aggShare > 0.5 ? PPT_THEME.redNeg : PPT_THEME.green });
+    // top-3 most dependent stores
+    const depRows = Object.entries(D.perStoreAgg).map(([si, v]) => {
+      const st = D.stores.find(x => x.si == si); if (!st) return null;
+      return { short: st.short, share: st.cyS > 0 ? v / st.cyS : 0 };
+    }).filter(Boolean).sort((a, b) => b.share - a.share).slice(0, 5);
+    s.addText('Πιο εξαρτημένα:', { x: 6.8, y: 3.0, w: 6, h: 0.35, fontSize: 12, bold: true, color: TX });
+    s.addText(depRows.map(x => ({ text: x.short + '  ' + (x.share * 100).toFixed(0) + '%', options: { bullet: true, color: TX, fontSize: 12, paraSpaceAfter: 5 } })), { x: 7.0, y: 3.4, w: 5.6, h: 2 });
+    narrate(s, [
+      'Aggregators = ' + (aggShare * 100).toFixed(1) + '% του τζίρου — ' + (aggShare > 0.5 ? 'υψηλή έκθεση σε προμήθειες.' : 'διαχειρίσιμη έκθεση.'),
+      depRows.length ? ('Μεγαλύτερη εξάρτηση: ' + depRows[0].short + ' (' + (depRows[0].share * 100).toFixed(0) + '%) — ευκαιρία για push σε ιδιόκτητα κανάλια.') : '',
+    ].filter(Boolean), 5.5);
+
+    // ---------- SLIDE 7: Traffic vs Ticket (Marketing) ----------
+    s = pptx.addSlide(); slideHead(s, '⚖️ Traffic vs Ticket — τι κινεί την ανάπτυξη', period + '  ·  Marketing');
+    const decomp = D.stores.filter(x => x.tcYoY != null && x.lyAvg && x.cyAvg).map(x => ({
+      short: x.short, tc: x.tcYoY, avt: x.cyAvg / x.lyAvg - 1,
+    }));
+    const volDriven = decomp.filter(x => x.tc > 0.02 && x.avt < 0).sort((a, b) => b.tc - a.tc).slice(0, 4);
+    const priceDriven = decomp.filter(x => x.avt > 0.02 && x.tc < 0).sort((a, b) => b.avt - a.avt).slice(0, 4);
+    s.addText('📊 Ανάπτυξη από ΟΓΚΟ (περισσότεροι πελάτες)', { x: 0.5, y: 1.35, w: 6, h: 0.4, fontSize: 13, bold: true, color: PPT_THEME.green });
+    s.addText(volDriven.length ? volDriven.map(x => ({ text: x.short + '  TCs ' + pc(x.tc) + ' / ticket ' + pc(x.avt), options: { bullet: true, color: TX, fontSize: 12, paraSpaceAfter: 6 } })) : [{ text: '—', options: { color: DIM } }], { x: 0.7, y: 1.8, w: 5.9, h: 2.4 });
+    s.addText('💶 Ανάπτυξη από ΤΙΜΗ/MIX (ακριβότερο καλάθι)', { x: 6.8, y: 1.35, w: 6, h: 0.4, fontSize: 13, bold: true, color: PPT_THEME.amber });
+    s.addText(priceDriven.length ? priceDriven.map(x => ({ text: x.short + '  ticket ' + pc(x.avt) + ' / TCs ' + pc(x.tc), options: { bullet: true, color: TX, fontSize: 12, paraSpaceAfter: 6 } })) : [{ text: '—', options: { color: DIM } }], { x: 7.0, y: 1.8, w: 5.9, h: 2.4 });
+    narrate(s, [
+      'Όπου η ανάπτυξη έρχεται από όγκο, οι προσφορές φέρνουν κόσμο — κράτα τες αν το ticket αντέχει.',
+      'Όπου έρχεται από τιμή, η αύξηση κρύβει πτώση επισκεψιμότητας — ρίσκο αν συνεχιστεί.',
+    ], 4.5);
+
+    // ---------- SLIDE 8: Watch-list ----------
+    s = pptx.addSlide(); slideHead(s, '🔴 Watch-list — απαιτούν προσοχή');
+    const watch = D.stores.filter(x => (x.streak && x.streak <= -3) || (x.yoy != null && x.yoy < -0.1) || (x.vsB != null && x.vsB < -0.1));
+    if (watch.length) {
+      const wr = [pptHead(['Store', 'vs LY', 'vs Budget', 'Streak', 'Θέμα'])];
+      watch.sort((a, b) => (a.yoy ?? 0) - (b.yoy ?? 0)).forEach(x => {
+        const issues = [];
+        if (x.streak <= -3) issues.push((-x.streak) + ' αρνητικές εβδ');
+        if (x.yoy != null && x.yoy < -0.1) issues.push('πτώση YoY');
+        if (x.vsB != null && x.vsB < -0.1) issues.push('κάτω από budget');
+        wr.push([pptName(x.short), pptPct(x.yoy), pptPct(x.vsB), pptNum(x.streak <= -3 ? '🔴' + (-x.streak) : (x.streak >= 3 ? '🟢' + x.streak : '—')), pptName(issues.join(', '))]);
+      });
+      s.addTable(wr, { x: 0.5, y: 1.4, w: 12.3, colW: [3, 1.6, 1.8, 1.4, 4.5], border: { type: 'solid', color: PPT_THEME.border, pt: 0.5 }, fontSize: 10, rowH: 0.32 });
+    } else {
+      s.addText('✅ Κανένα κατάστημα δεν πληροί τα κριτήρια της watch-list αυτόν τον μήνα.', { x: 0.5, y: 2, w: 12, h: 0.6, fontSize: 16, color: PPT_THEME.green });
+    }
+    narrate(s, [
+      watch.length ? ('Προτεραιότητα: ' + watch.slice(0, 3).map(x => x.short).join(', ') + '.') : 'Υγιής μήνας — κανένα άμεσο flag.',
+      'Για κάθε store της λίστας: αιτία (τοπική/εποχική/ανταγωνισμός) και πλάνο δράσης.',
+    ], 5.2);
+
+    const fname = (document.title.includes('Taco') ? 'TB' : 'KFC') + '_RGM_Pack_' + R.to + '.pptx';
+    pptx.writeFile({ fileName: fname }).then(() => { if (btn) { btn.disabled = false; btn.textContent = '📊 RGM Pack'; } });
+  } catch (e) {
+    alert('Σφάλμα RGM Pack: ' + e.message);
+    console.error(e);
+    if (btn) { btn.disabled = false; btn.textContent = '📊 RGM Pack'; }
+  }
+}
+
 function exportFullPPTX() {
   const btn = document.getElementById('exportPptxBtn');
   try {
@@ -9876,6 +10327,8 @@ function exportFullPPTX() {
   }
 }
 window.exportFullPPTX = exportFullPPTX;
+window.exportRGMPack = exportRGMPack;
+window.openStoreOnePagers = openStoreOnePagers;
 
 
 // =====================================================================
