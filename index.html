@@ -2672,6 +2672,44 @@ function aggregate(fromDate, toDate, storeFilter) {
   return { byStore, byST, byType, byCH, total: {sales: totalSales, tcs: totalTCs}, dates };
 }
 
+// Βάρη ημερών ενός μήνα από το σχήμα ημέρας εβδομάδας του καταστήματος.
+// Επιστρέφει {f, tot}: f[dow] = συντελεστής, tot = άθροισμα των συντελεστών
+// ΟΛΩΝ των ημερών του μήνα -> f[dow]/tot = μερίδιο της ημέρας, αθροίζει σε 1.
+// Αν το κατάστημα δεν έχει πρόσφατα δεδομένα, η fcStoreDowFactor γυρίζει μονάδες
+// και το αποτέλεσμα ξαναγίνεται ισόποσο - καμία παλινδρόμηση.
+const _budgetDowNormCache = new Map();
+function budgetDowNorm(storeIdx, year, month) {
+  const key = storeIdx + '|' + year + '|' + month;
+  if (_budgetDowNormCache.has(key)) return _budgetDowNormCache.get(key);
+  const f = fcStoreDowFactor(storeIdx);
+  const dim = new Date(year, month, 0).getDate();
+  let tot = 0;
+  for (let d = 1; d <= dim; d++) tot += f[new Date(Date.UTC(year, month - 1, d)).getUTCDay()];
+  const r = { f, tot };
+  _budgetDowNormCache.set(key, r);
+  return r;
+}
+
+// Άθροισμα των ΠΕΡΣΙΝΩΝ ημερών που αντιστοιχούν στις ημέρες ΑΥΤΟΥ του μήνα
+// (μετατόπιση 364), μαζί με το ποσοστό ημερών που πέρσι είχαν όντως τζίρο.
+// Το άθροισμα είναι ο σωστός παρονομαστής: εγγυάται ότι τα ημερήσια μερίδια
+// κάνουν ακριβώς 1. Το coverage λέει αν το κατάστημα λειτουργούσε όλο τον μήνα.
+const _lyBudgetWindowCache = new Map();
+function lyBudgetWindow(storeIdx, year, month, ly_mode) {
+  const key = storeIdx + '|' + year + '|' + month + '|' + ly_mode;
+  if (_lyBudgetWindowCache.has(key)) return _lyBudgetWindowCache.get(key);
+  const dim = new Date(year, month, 0).getDate();
+  let sales = 0, tcs = 0, daysWith = 0;
+  for (let d = 1; d <= dim; d++) {
+    const ds = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const a = dailyStore.get(lyDate(ds, ly_mode));
+    if (a && a[storeIdx].sales > 0) { sales += a[storeIdx].sales; tcs += a[storeIdx].tcs; daysWith++; }
+  }
+  const r = { sales, tcs, coverage: dim > 0 ? daysWith / dim : 0 };
+  _lyBudgetWindowCache.set(key, r);
+  return r;
+}
+
 const _budgetDayCache = new Map();
 function getDayBudget(dateStr, storeIdx, ly_mode) {
   const key = dateStr + "|" + storeIdx + "|" + ly_mode;
@@ -2696,17 +2734,36 @@ function getDayBudget(dateStr, storeIdx, ly_mode) {
     _budgetDayCache.set(key, r); return r;
   }
   const lyD = lyDate(dateStr, ly_mode);
-  const lyYM = lyD.slice(0,7);
   const [lyY, lyM] = lyD.split("-").map(Number);
   const lyDaysInMonth = new Date(Date.UTC(lyY, lyM, 0)).getUTCDate();
-  const lyMonthAgg = monthStoreTotal.get(lyYM);
-  const lyMonthSales = lyMonthAgg ? lyMonthAgg[storeIdx].sales : 0;
-  const lyMonthTCs = lyMonthAgg ? lyMonthAgg[storeIdx].tcs : 0;
   const lyDayAgg = dailyStore.get(lyD);
   const lyDaySales = lyDayAgg ? lyDayAgg[storeIdx].sales : 0;
   const lyDayTCs = lyDayAgg ? lyDayAgg[storeIdx].tcs : 0;
-  const dayBS = lyMonthSales > 0 ? monthBudget.Sales * (lyDaySales / lyMonthSales) : monthBudget.Sales / lyDaysInMonth;
-  const dayBT = lyMonthTCs > 0 ? monthBudget.TCs * (lyDayTCs / lyMonthTCs) : monthBudget.TCs / lyDaysInMonth;
+  // ΠΑΡΑΘΥΡΟ, όχι περσινός ΜΗΝΑΣ: οι περσινές ημέρες βρίσκονται με μετατόπιση
+  // 364 ημερών (52 εβδομάδες, για ίδια ημέρα εβδομάδας). 364 != 365, άρα το
+  // παράθυρο γλιστράει και ξεχειλίζει στον διπλανό μήνα - ενώ ο παρονομαστής
+  // ήταν το σύνολο του περσινού ΜΗΝΑ. Τα μερίδια δεν άθροιζαν σε 1.
+  const win = lyBudgetWindow(storeIdx, parseInt(dateStr.slice(0, 4)), month, ly_mode);
+  // Χωρίς περσινά για τον μήνα, το μηνιαίο budget μοιραζόταν ΙΣΟΠΟΣΑ στις ημέρες
+  // -> ευθεία γραμμή στο Trend, χωρίς Σαββατοκύριακα. Στο Taco Bell αυτό ισχύει
+  // για ΟΛΟ τον Ιουν-Αυγ (τα δεδομένα ξεκινούν 01/09/2025), δηλαδή ακριβώς τους
+  // μήνες που βλέπει σήμερα ο χρήστης. Εφεδρικά χρησιμοποιούμε το σχήμα ημέρας
+  // εβδομάδας των τελευταίων 8 εβδομάδων (fcStoreDowFactor) - ΚΑΝΟΝΙΚΟΠΟΙΗΜΕΝΟ
+  // στις ημέρες ΤΟΥ ΣΥΓΚΕΚΡΙΜΕΝΟΥ μήνα, ώστε το άθροισμα να βγαίνει ΑΚΡΙΒΩΣ το
+  // μηνιαίο budget (μήνας με 5 Σάββατα παίρνει το βάρος που του αναλογεί).
+  const dow = new Date(dateStr + 'T12:00:00').getDay();
+  const nrm = budgetDowNorm(storeIdx, parseInt(dateStr.slice(0, 4)), month);
+  const dowShare = nrm.tot > 0 ? nrm.f[dow] / nrm.tot : 1 / lyDaysInMonth;
+
+  // Το περσινό σχήμα χρησιμοποιείται ΜΟΝΟ αν πέρσι λειτουργούσε σχεδόν όλος ο
+  // μήνας. Αν το κατάστημα άνοιξε π.χ. στις 20, το περσινό σχήμα θα έστριβε
+  // ΟΛΟΚΛΗΡΟ το μηνιαίο budget στις 10 τελευταίες ημέρες και θα άφηνε τις
+  // υπόλοιπες στο μηδέν. Εκεί χρησιμοποιείται το σχήμα ημέρας εβδομάδας.
+  const useLY = win.coverage >= 0.8;
+  const dayBS = (useLY && win.sales > 0) ? monthBudget.Sales * (lyDaySales / win.sales)
+                                         : monthBudget.Sales * dowShare;
+  const dayBT = (useLY && win.tcs > 0) ? monthBudget.TCs * (lyDayTCs / win.tcs)
+                                       : monthBudget.TCs * dowShare;
   const r = {sales: dayBS, tcs: dayBT};
   _budgetDayCache.set(key, r);
   return r;
@@ -6028,20 +6085,75 @@ function csOverLs(a, b) { return b > 0 ? a / b : null; }  // helper (legacy)
 function daysWithData() { return 28; }
 
 function fcChainSeasonality() {
-  // month factor from LY chain: month avg-daily / year avg-daily
+  // Συντελεστής μήνα από την περσινή χρονιά.
+  //
+  // ΗΤΑΝ: τζίρος μήνα / ημέρες μήνα, δηλαδή ΗΜΕΡΟΛΟΓΙΑΚΕΣ ημέρες. Έτσι ένας
+  // μήνας με περισσότερα ανοιχτά καταστήματα έβγαινε «ισχυρός μήνας» — δηλαδή
+  // η καμπύλη ΑΝΟΙΓΜΑΤΩΝ περνούσε ως εποχικότητα. Μετρημένο στο Taco Bell:
+  // Δεκ 2025 = 1.300 με 3 καταστήματα, ενώ ΑΝΑ ΚΑΤΑΣΤΗΜΑ είναι 0.884.
+  // Και το άνοιγμα στα μέσα του μήνα μετρούσε ολόκληρο τον μήνα ως αδύναμο.
+  //
+  // ΤΩΡΑ: διαιρούμε με ΗΜΕΡΕΣ-ΚΑΤΑΣΤΗΜΑΤΟΣ (πόσα καταστήματα λειτούργησαν
+  // πραγματικά κάθε ημέρα). Κατάστημα που άνοιξε στις 20 μετράει 10 ημέρες,
+  // όχι 30, και δεν βαραίνει τον μήνα.
   if (_fc.seasonality) return _fc.seasonality;
   const lyYear = parseInt(LATEST.slice(0, 4)) - 1;
-  const mSum = new Array(13).fill(0), mDays = new Array(13).fill(0);
-  dailyTotal.forEach((v, d) => {
-    if (parseInt(d.slice(0, 4)) !== lyYear || v.sales <= 0) return;
+  const mSum = new Array(13).fill(0);
+  const mDays = new Array(13).fill(0);        // ημερολογιακές ημέρες με τζίρο
+  const mStoreDays = new Array(13).fill(0);   // ΑΘΡΟΙΣΜΑ ανοιχτών καταστημάτων ανά ημέρα
+  const mStores = Array.from({length: 13}, () => new Set());
+  dailyStore.forEach((arr, d) => {
+    if (parseInt(d.slice(0, 4)) !== lyYear) return;
     const m = parseInt(d.slice(5, 7));
-    mSum[m] += v.sales; mDays[m]++;
+    let daySales = 0, open = 0;
+    for (let si = 0; si < STORES.length; si++) {
+      if (arr[si].sales > 0) { daySales += arr[si].sales; open++; mStores[m].add(si); }
+    }
+    if (daySales <= 0) return;
+    mSum[m] += daySales; mDays[m]++; mStoreDays[m] += open;
   });
-  let tot = 0, totD = 0;
-  for (let m = 1; m <= 12; m++) { tot += mSum[m]; totD += mDays[m]; }
-  const avg = totD > 0 ? tot / totD : 0;
+  let tot = 0, totSD = 0;
+  for (let m = 1; m <= 12; m++) { tot += mSum[m]; totSD += mStoreDays[m]; }
+  const avgStoreDay = totSD > 0 ? tot / totSD : 0;
+
+  // Αν η αλυσίδα μεγάλωσε πολύ μέσα στην περσινή χρονιά, ακόμα και ο
+  // κανονικοποιημένος συντελεστής συγκρίνει ΔΙΑΦΟΡΕΤΙΚΑ μείγματα καταστημάτων
+  // (π.χ. «ο μήνας που λειτουργούσε μόνο το καλύτερο μαγαζί»). Σε αυτή την
+  // περίπτωση δηλώνουμε άγνοια (1.000) αντί για πειστικό-αλλά-λάθος νούμερο.
+  let minStores = Infinity, maxStores = 0;
+  for (let m = 1; m <= 12; m++) {
+    if (!mDays[m]) continue;
+    minStores = Math.min(minStores, mStores[m].size);
+    maxStores = Math.max(maxStores, mStores[m].size);
+  }
+  const unstable = !isFinite(minStores) || maxStores === 0 || (minStores / maxStores) < 0.7;
+
   const f = new Array(13).fill(1);
-  for (let m = 1; m <= 12; m++) f[m] = (mDays[m] >= 20 && avg > 0) ? (mSum[m] / mDays[m]) / avg : 1;
+  if (!unstable) {
+    for (let m = 1; m <= 12; m++) {
+      f[m] = (mDays[m] >= 20 && avgStoreDay > 0 && mStoreDays[m] > 0)
+        ? (mSum[m] / mStoreDays[m]) / avgStoreDay : 1;
+    }
+    f.borrowed = false;
+  } else {
+    // ΔΑΝΕΙΣΜΕΝΗ ΕΠΟΧΙΚΟΤΗΤΑ (απόφαση χρήστη 07/08/2026).
+    // Το Taco Bell πήγε από 1 σε 3 καταστήματα μέσα στο 2025, οπότε δεν μπορεί
+    // να βγάλει δική του εποχικότητα - κάθε μήνας συγκρίνεται με διαφορετικό
+    // μείγμα. Χωρίς αυτό το μπλοκ όλοι οι μήνες θα ήταν 1.000, δηλαδή
+    // Δεκέμβριος = Φεβρουάριος.
+    // Πηγή: KFC Ελλάδας, έτος 2025, ΚΑΝΟΝΙΚΟΠΟΙΗΜΕΝΟ ανά ημέρα-καταστήματος
+    // (21-22 καταστήματα σταθερά όλο τον χρόνο -> καθαρό εποχικό σχήμα).
+    // Ίδια αγορά, ίδιο κοινό, ίδια κατηγορία. ΕΙΝΑΙ ΥΠΟΘΕΣΗ - γι' αυτό
+    // δηλώνεται στην οθόνη μέσω του f.borrowed.
+    // ΑΥΤΟΑΚΥΡΩΝΕΤΑΙ: μόλις το Taco Bell έχει σταθερό αριθμό καταστημάτων μέσα
+    // στην περσινή χρονιά (>=70%), τρέχει ο κλάδος από πάνω με ΔΙΚΑ του νούμερα.
+    // Αναμένεται από τον Ιαν 2027 (2026: 3 καταστήματα Ιαν-Μαι, 4 από 20/05).
+    const KFC_2025 = [0, 1.064, 1.022, 0.972, 1.024, 1.025, 0.948,
+                         0.864, 0.912, 0.932, 1.033, 1.045, 1.153];
+    for (let m = 1; m <= 12; m++) f[m] = KFC_2025[m];
+    f.borrowed = true;
+  }
+  f.unstable = unstable;   // το διαβάζει το UI για να το πει στον χρήστη
   _fc.seasonality = f;
   return f;
 }
@@ -6188,10 +6300,18 @@ function renderForecast(R) {
     return { s, t, anyRun, actualDays, projDays };
   }
 
+  // Η δανεισμένη εποχικότητα είναι ΥΠΟΘΕΣΗ. Υπόθεση που δεν φαίνεται στην οθόνη
+  // είναι το ίδιο πρόβλημα με το σφάλμα που αντικατέστησε - δηλώνεται ρητά.
+  const _seasNote = fcChainSeasonality().borrowed
+    ? ` <strong>Εποχικότητα:</strong> δανεισμένη από το KFC Ελλάδας (2025) — το Taco Bell
+        άνοιγε καταστήματα μέσα στην περσινή χρονιά, οπότε δεν βγάζει δική του.
+        Αντικαθίσταται αυτόματα μόλις υπάρξει πλήρης χρονιά με σταθερά καταστήματα.`
+    : '';
+
   let html = `
     <div class="insight" style="border-left-color: var(--accent)">
       <div class="ins-label">🔮 Πώς υπολογίζεται</div>
-      <div class="ins-text">Projected = περσινή ίδια μέρα εβδομάδας (364-shift) × <strong>momentum</strong> (YoY τελευταίων 28 ημερών ανά store). Νέα stores χωρίς πέρσι: run-rate 28 ημερών × DOW pattern × seasonality αλυσίδας. Τρέχων μήνας = MTD actual + projected υπόλοιπο. Budget ημέρας/εβδομάδας = μηνιαίο budget × περσινό daily shape. <strong>Το store filter εφαρμόζεται.</strong></div>
+      <div class="ins-text">Projected = περσινή ίδια μέρα εβδομάδας (364-shift) × <strong>momentum</strong> (YoY τελευταίων 28 ημερών ανά store). Νέα stores χωρίς πέρσι: run-rate 28 ημερών × DOW pattern × seasonality αλυσίδας. Τρέχων μήνας = MTD actual + projected υπόλοιπο. Budget ημέρας/εβδομάδας = μηνιαίο budget × περσινό daily shape. <strong>Το store filter εφαρμόζεται.</strong>${_seasNote}</div>
     </div>`;
 
   // ============ SECTION 1: MONTHLY to year-end ============
@@ -9783,7 +9903,7 @@ function exportRGMPack() {
       s.addText(sub || (period + '  ·  ' + brand), { x: 0.5, y: 0.92, w: 12.3, h: 0.35, fontSize: 11, color: DIM });
     };
     const narrate = (s, lines, y) => {
-      s.addText('🗣 Μπούσουλας ομιλητή', { x: 0.5, y: y, w: 12.3, h: 0.3, fontSize: 11, bold: true, color: PPT_THEME.amber });
+      s.addText('Ενδεικτικά Key Points', { x: 0.5, y: y, w: 12.3, h: 0.3, fontSize: 11, bold: true, color: PPT_THEME.amber });
       s.addText(lines.map(t => ({ text: t, options: { bullet: true, color: TX, fontSize: 11, paraSpaceAfter: 4 } })),
         { x: 0.6, y: y + 0.32, w: 12.2, h: 1.4 });
     };
