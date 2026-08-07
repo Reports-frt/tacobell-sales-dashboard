@@ -84,6 +84,24 @@ CONFIG = {
     "budget_source_xlsx": r"C:\Users\IT\Documents\GitHub\tacobell-sales-dashboard\_work\budget_source.xlsx",
     # Όταν αλλάξει το budget v2, απλά αντικαθιστάς αυτό το αρχείο.
 
+    # Αντιστοίχιση ονομάτων: το Management Report λέει "TB HALANDRI", το
+    # dashboard (Targit) λέει "TACO BELL- ΧΑΛΑΝΔΡΙ". Στο KFC τα δύο ταυτίζονται
+    # και δεν χρειάζεται map - εδώ ΧΩΡΙΣ αυτό το budget μένει άδειο.
+    # Οι τιμές πρέπει να είναι ΑΚΡΙΒΩΣ ίδιες με το meta.stores του data.json:
+    # το index.html κάνει budget[STORES[si]] - οποιαδήποτε απόκλιση = σιωπηλό κενό.
+    "budget_store_map": {
+        "TB HALANDRI": "TACO BELL- ΧΑΛΑΝΔΡΙ",
+        # ΠΡΟΣΟΧΗ: το όνομα του MALL ξεκινά με ΕΛΛΗΝΙΚΟ Ταυ (U+03A4), όχι
+        # λατινικό T. Γραμμένο ως escape ώστε να μην "διορθωθεί" κατά λάθος.
+        "TB THE MALL": "\u03a4ACO BELL- MALL",
+        # Η Πανόρμου βρίσκεται στους Αμπελόκηπους - τα άλλα τρία ταιριάζουν
+        # ένα προς ένα, οπότε προκύπτει και εξ αποκλεισμού.
+        "TB PANORMOU": "TACO BELL- ΑΜΠΕΛΟΚΗΠΟΙ",
+        "TB KYPSELI":  "TACO BELL-ΚΥΨΕΛΗ",
+        # "TB ALL" = συγκεντρωτική γραμμή. ΔΕΝ μπαίνει: το index.html αθροίζει
+        # μόνο του τα καταστήματα (monthBudget), σεβόμενο το φίλτρο καταστημάτων.
+    },
+
     # Git authentication (PAT)
     # Το PAT διαβάζεται από τοπικό αρχείο για ασφάλεια — δεν είναι hardcoded εδώ
     "pat_file":         r"C:\Users\IT\Documents\GitHub\tacobell-sales-dashboard\_work\.github_pat",
@@ -401,6 +419,7 @@ def parse_hourly_data(xlsx_path):
 
     # Merge DELIVERAS into E-FOOD GO
     leaf.loc[leaf['Channel'] == 'DELIVERAS', 'Channel'] = DELIVERAS_MERGE_INTO
+    leaf = normalize_channels(leaf, 'hourly', order_only=True)
 
     log.info(f"  Leaf rows after filtering: {len(leaf):,}")
 
@@ -482,9 +501,32 @@ def parse_hourly_data(xlsx_path):
 #   "Mall Food Court"  - inside food court
 #   "Drive Through"    - dedicated drive-through location
 STORE_MAPPING = [
-    # TB stores will be auto-registered from sales data on first encounter.
-    # To override defaults (store_type, opening_date, is_new), add explicit entries here:
     # ([TargitNames], ResultName, ShortLabel, StoreType, OpeningDate, IsNewStore)
+    #
+    # ⚠ ΤΟ ResultName ΕΙΝΑΙ ΚΛΕΙΔΙ — ΜΗΝ ΤΟ ΑΛΛΑΞΕΙΣ. Πάνω του δένουν:
+    #   (α) τα ιστορικά records του data.json (meta.stores),
+    #   (β) το CONFIG["budget_store_map"],
+    #   (γ) το index.html (budget[STORES[si]]).
+    # Οποιαδήποτε απόκλιση = διπλό κατάστημα στο merge + σιωπηλά χαμένο ιστορικό.
+    # Γι' αυτό κρατάμε ΑΥΤΟΥΣΙΑ τα ονόματα που παρήγαγε η auto-registration,
+    # μαζί με τις ιδιομορφίες τους (ελληνικό Ταυ στο MALL, κενό που λείπει στην
+    # ΚΥΨΕΛΗ) — δεν είναι λάθη προς διόρθωση εδώ.
+    #
+    # ΗΜΕΡΟΜΗΝΙΕΣ ΑΝΟΙΓΜΑΤΟΣ: πρώτη ημέρα με >100 συναλλαγές (κανόνας χρήστη,
+    # 07/08/2026). Κάθε κατάστημα έχει μία ημέρα-φάντασμα πολύ νωρίτερα με
+    # 1 συναλλαγή / 0,44 € (δοκιμαστική κίνηση POS πριν το άνοιγμα) — στην
+    # ΚΥΨΕΛΗ η απόσταση είναι 26 ημέρες (20/05 φάντασμα, 15/06 άνοιγμα).
+    # Οι παραλλαγές με "Τ" είναι ΕΛΛΗΝΙΚΟ Ταυ (U+03A4) — γραμμένες ως escape
+    # ώστε να μην "διορθωθούν" σιωπηλά σε λατινικό T από επεξεργαστή ή αναζήτηση.
+    (["TACO BELL- ΧΑΛΑΝΔΡΙ", "\u03a4ACO BELL- ΧΑΛΑΝΔΡΙ", "TACO BELL-ΧΑΛΑΝΔΡΙ"],
+     "TACO BELL- ΧΑΛΑΝΔΡΙ",    "ΧΑΛΑΝΔΡΙ",    "In Line",         "2025-09-03", True),
+    # ⚠ Το MALL έχει ΕΛΛΗΝΙΚΟ Ταυ και στο ίδιο το ResultName — το Τ ΔΕΝ είναι T.
+    (["\u03a4ACO BELL- MALL", "TACO BELL- MALL", "\u03a4ACO BELL-MALL", "TACO BELL-MALL"],
+     "\u03a4ACO BELL- MALL",   "MALL",        "Mall Food Court", "2025-10-24", True),
+    (["TACO BELL- ΑΜΠΕΛΟΚΗΠΟΙ", "\u03a4ACO BELL- ΑΜΠΕΛΟΚΗΠΟΙ", "TACO BELL-ΑΜΠΕΛΟΚΗΠΟΙ"],
+     "TACO BELL- ΑΜΠΕΛΟΚΗΠΟΙ", "ΑΜΠΕΛΟΚΗΠΟΙ", "In Line",         "2025-12-17", True),
+    (["TACO BELL-ΚΥΨΕΛΗ", "TACO BELL- ΚΥΨΕΛΗ", "\u03a4ACO BELL-ΚΥΨΕΛΗ", "\u03a4ACO BELL- ΚΥΨΕΛΗ"],
+     "TACO BELL-ΚΥΨΕΛΗ",       "ΚΥΨΕΛΗ",      "In Line",         "2026-06-15", True),
 ]
 # When new stores open or their classification changes (Same -> mature etc), edit the IsNewStore flag here.
 
@@ -529,6 +571,42 @@ CHANNEL_TO_SALESTYPE = {
     'Unknown': 'TAKEAWAY',
 }
 
+# Το POS του Taco Bell ονομάζει το ταμείο "STORE ORDER"· του KFC "STORE".
+# Χωρίς αυτή την αντιστοίχιση οι γραμμές δεν έβρισκαν θέση σε κανέναν χάρτη
+# και ΠΕΤΑΓΟΝΤΑΝ ΣΙΩΠΗΛΑ από κάθε view (112.875 EUR σε 11 μήνες).
+CHANNEL_ALIASES = {'STORE ORDER': 'STORE'}
+
+
+def normalize_channels(df, where, order_only=False):
+    """Ενοποίηση ονομάτων καναλιών + ΔΥΝΑΤΗ αναφορά για ό,τι δεν αναγνωρίζεται.
+
+    Ξεχωρίζει ΔΥΟ σοβαρότητες — ψεύτικος συναγερμός εκπαιδεύει να τον αγνοείς:
+      ERROR   = το κανάλι δεν υπάρχει στους χάρτες -> χάνεται από ΚΑΘΕ view
+      WARNING = υπάρχει στους χάρτες αλλά όχι στο CHANNEL_ORDER -> τα σύνολα
+                είναι σωστά, λείπει μόνο από την ανάλυση ανά κανάλι
+    Στο ωριαίο (order_only=True) μετράει μόνο το CHANNEL_ORDER.
+    """
+    for src, dst in CHANNEL_ALIASES.items():
+        n = int((df['Channel'] == src).sum())
+        if n:
+            log.info(f"  [{where}] {src} -> {dst}: {n:,} γραμμές")
+            df.loc[df['Channel'] == src, 'Channel'] = dst
+    col = 'Sales' if 'Sales' in df.columns else ('Value' if 'Value' in df.columns else None)
+    for ch in sorted(set(df['Channel'].dropna().unique())):
+        amt = float(df.loc[df['Channel'] == ch, col].sum()) if col else 0.0
+        mapped = ch in CHANNEL_TO_SALESTYPE and ch in CHANNEL_TO_TYPE
+        if order_only:
+            if ch not in CHANNEL_ORDER:
+                log.error(f"  [{where}] ΑΓΝΩΣΤΟ ΚΑΝΑΛΙ '{ch}' — {amt:,.2f} EUR ΕΞΩ από το "
+                          f"ωριαίο. Πρόσθεσέ το στο CHANNEL_ALIASES ή στο CHANNEL_ORDER.")
+        elif not mapped:
+            log.error(f"  [{where}] ΑΓΝΩΣΤΟ ΚΑΝΑΛΙ '{ch}' — {amt:,.2f} EUR ΔΕΝ θα εμφανιστούν "
+                      f"ΠΟΥΘΕΝΑ. Πρόσθεσέ το στο CHANNEL_ALIASES ή στους χάρτες.")
+        elif ch not in CHANNEL_ORDER:
+            log.warning(f"  [{where}] '{ch}' εκτός CHANNEL_ORDER — {amt:,.2f} EUR μετράνε στα "
+                        f"σύνολα αλλά ΛΕΙΠΟΥΝ από την ανάλυση ανά κανάλι.")
+    return df
+
 # Order in which channels appear in dashboard tables
 CHANNEL_ORDER = ['KIOSK', 'STORE', 'MOBILE', 'WEB SITE', 'DRIVETHRU', 'E-FOOD GO', 'WOLT', 'BOX']
 TYPE_ORDER = ['STORE', 'DRIVE THRU', 'END-TO-END']
@@ -563,33 +641,63 @@ def load_budget(budget_xlsx_path):
     log.info(f"  Reading sheet: '{result_sheet_name}'")
     ws = wb[result_sheet_name]
 
-    # Auto-detect store column: try col 2 first (new format), fallback col 1 (old format).
-    # Detect by counting how many distinct values look like "KFC ..." in each column.
-    def count_kfc_values(col_idx):
-        seen = set()
-        for r in range(2, min(ws.max_row + 1, 200)):
-            v = ws.cell(row=r, column=col_idx).value
-            if v and str(v).strip().upper().startswith('KFC'):
-                seen.add(str(v).strip())
-        return len(seen)
-    c1, c2 = count_kfc_values(1), count_kfc_values(2)
-    store_col = 2 if c2 > c1 else 1
-    log.info(f"  Store name column: {store_col} (col 1 has {c1} KFC names, col 2 has {c2})")
+    # --- Στήλη ονόματος καταστήματος ---
+    # Η παλιά ευρετική μετρούσε τιμές που ξεκινούν με "KFC" - στο Taco Bell
+    # γυρίζει 0 και στις δύο στήλες και κλείδωνε ΣΙΩΠΗΛΑ στη στήλη 1, που
+    # περιέχει το Store Type ("All"/"NS"), όχι όνομα. Τώρα διαβάζεται η
+    # επικεφαλίδα της γραμμής 1, με τα ονόματα του map ως δίχτυ ασφαλείας.
+    store_map = CONFIG.get("budget_store_map") or {}
+    store_col = None
+    for c in range(1, 6):
+        if str(ws.cell(row=1, column=c).value or "").strip().lower() == "store name":
+            store_col = c
+            break
+    if store_col is None:
+        def count_known(col_idx):
+            seen = set()
+            for r in range(2, min(ws.max_row + 1, 400)):
+                v = ws.cell(row=r, column=col_idx).value
+                if v and str(v).strip() in store_map:
+                    seen.add(str(v).strip())
+            return len(seen)
+        c1, c2 = count_known(1), count_known(2)
+        store_col = 2 if c2 >= c1 else 1
+        log.warning(f"  Δεν βρέθηκε επικεφαλίδα 'Store Name' - "
+                    f"επιλέχθηκε η στήλη {store_col} (γνωστά ονόματα: c1={c1}, c2={c2})")
+    else:
+        log.info(f"  Store name column: {store_col} (από την επικεφαλίδα 'Store Name')")
 
-    # Auto-detect month columns by scanning row 4 (dates).
-    # Row 4 contains datetime objects for each monthly column.
+    # --- Στήλες μηνών ---
+    # Γραμμή 4 = ημερομηνία του μήνα, γραμμή 2 = ΣΕΝΑΡΙΟ ("Budget v1 2026" ή
+    # "ACT 2026"). Το Management Report δίνει actuals για τους κλεισμένους μήνες
+    # στις ΙΔΙΕΣ στήλες. Χωρίς αυτό το φίλτρο, οι μήνες αυτοί περνούσαν ως
+    # "budget" και η σύγκριση actual-vs-budget έβγαινε πάντα ακριβώς 100%.
     import datetime as _dt
-    month_cols = {}  # month_int (1-12) -> column index
+    month_cols = {}      # month_int (1-12) -> column index
+    skipped = {}         # month_int -> σενάριο που απορρίφθηκε
     for c in range(6, 25):
         v = ws.cell(row=4, column=c).value
-        if isinstance(v, _dt.datetime):
-            month_cols[v.month] = c
+        if not isinstance(v, _dt.datetime):
+            continue
+        scenario = str(ws.cell(row=2, column=c).value or "").strip()
+        if "budget" not in scenario.lower():
+            skipped[v.month] = scenario or "(κενό)"
+            continue
+        month_cols[v.month] = c
+
+    if skipped:
+        log.warning("  ΠΡΟΣΟΧΗ: μήνες ΧΩΡΙΣ budget στο αρχείο (δεν μπαίνουν): "
+                    + ", ".join(f"{m}={s}" for m, s in sorted(skipped.items())))
     if len(month_cols) < 12:
-        log.warning(f"  Only found {len(month_cols)} month columns in row 4. Months found: {sorted(month_cols.keys())}")
+        log.warning(f"  Βρέθηκαν {len(month_cols)}/12 μήνες budget: {sorted(month_cols.keys())}")
     else:
         log.info(f"  Month columns detected: {month_cols}")
+    if not month_cols:
+        log.error("  Καμία στήλη budget στο αρχείο - το budget θα έμενε άδειο.")
+        sys.exit(1)
 
     budget = {}
+    unmapped = {}
     for r in range(5, ws.max_row + 1):
         store = ws.cell(row=r, column=store_col).value
         desc = ws.cell(row=r, column=5).value
@@ -597,6 +705,15 @@ def load_budget(budget_xlsx_path):
             continue
         store = str(store).strip()
         desc = str(desc).strip()
+
+        # Μετάφραση στο όνομα που ξέρει το dashboard. Ό,τι δεν είναι στο map
+        # (π.χ. η συγκεντρωτική γραμμή "TB ALL") παραλείπεται ΡΗΤΑ.
+        if store_map:
+            if store not in store_map:
+                unmapped[store] = unmapped.get(store, 0) + 1
+                continue
+            store = store_map[store]
+
         if store not in budget:
             budget[store] = {m: {} for m in range(1, 13)}
         if desc == 'Sales, Total':
@@ -615,8 +732,41 @@ def load_budget(budget_xlsx_path):
                 if v is not None:
                     budget[store][m]['AvgTicket'] = float(v)
 
-    log.info(f"  Budget loaded for {len(budget)} stores")
+    if unmapped:
+        log.info("  Γραμμές εκτός αντιστοίχισης (αναμενόμενο για τη συγκεντρωτική): "
+                 + ", ".join(f"{k} x{v}" for k, v in sorted(unmapped.items())))
+
+    # Δίχτυ: αν το map δεν ταίριαξε ΤΙΠΟΤΑ, το budget θα έμενε άδειο σιωπηλά.
+    if store_map and not budget:
+        log.error("  ΚΑΝΕΝΑ κατάστημα δεν αντιστοιχήθηκε. Ονόματα στο αρχείο: "
+                  + ", ".join(sorted(unmapped)))
+        log.error("  Διόρθωσε το CONFIG['budget_store_map'] και ξανατρέξε.")
+        sys.exit(1)
+
+    log.info(f"  Budget loaded for {len(budget)} stores: {sorted(budget)}")
     return budget
+
+
+def load_existing_store_meta():
+    """Διαβάζει το meta.store_meta από το ΥΠΑΡΧΟΝ data.json του repo.
+
+    Το χρησιμοποιεί ΜΟΝΟ η auto-registration: κατάστημα που καταχωρήθηκε σε
+    προηγούμενο τρέξιμο ΔΕΝ ξαναγράφεται με τη σημερινή ημερομηνία.
+    Χωρίς αυτό, το opening_date «κυλούσε» μαζί με τη σημερινή ΚΑΘΕ μέρα και το
+    is_new δεν γινόταν ποτέ False — δηλαδή κάθε auto-registered κατάστημα
+    εμφανιζόταν μόνιμα ως «άνοιξε σήμερα» (μετρημένο 07/08/2026, Taco Bell).
+    """
+    try:
+        json_path = os.path.join(CONFIG["repo_path"], "data.json")
+        with open(json_path, 'r', encoding='utf-8') as f:
+            meta = (json.load(f).get('meta') or {}).get('store_meta') or {}
+        return meta if isinstance(meta, dict) else {}
+    except FileNotFoundError:
+        log.info("  Δεν υπάρχει προηγούμενο data.json — η auto-registration θα βάλει προεπιλογές.")
+        return {}
+    except Exception as e:
+        log.warning(f"  Δεν διαβάστηκε το store_meta του υπάρχοντος data.json ({e}) — προεπιλογές.")
+        return {}
 
 
 def build_data_json(data, budget, hourly_data=None):
@@ -677,9 +827,12 @@ def build_data_json(data, budget, hourly_data=None):
     # Uses default metadata (In Line, today's date, marked as new).
     unmapped = data[data['StoreResult'].isna()]['Store'].unique()
     if len(unmapped) > 0:
-        log.info(f"Auto-registering {len(unmapped)} new stores: {list(unmapped)}")
+        log.info(f"Auto-registering {len(unmapped)} unmapped stores: {list(unmapped)}")
         from datetime import date as _date
         today_str = _date.today().isoformat()
+        # ΚΡΙΣΙΜΟ: ό,τι υπάρχει ήδη στο data.json ΔΕΝ ξαναγράφεται. Μόνο τα
+        # γνήσια νέα παίρνουν προεπιλογές (σημερινή ημερομηνία + is_new).
+        prev_store_meta = load_existing_store_meta()
         for raw_name in unmapped:
             # Clean store name for use as both ResultName and ShortLabel
             # E.g., "TACO BELL- ΧΑΛΑΝΔΡΙ" → result "TB HALANDRI", short "ΧΑΛΑΝΔΡΙ"
@@ -698,16 +851,28 @@ def build_data_json(data, budget, hourly_data=None):
                     break
             # Use the original (cleaned) name as the Result name — preserves brand identity
             result_name = cleaned
-            result_to_meta[result_name] = {
-                'short': short or cleaned,
-                'targit': cleaned,
-                'store_type': 'In Line',  # default — manually edit STORE_MAPPING for precise type
-                'opening_date': today_str,
-                'is_new': True,
-            }
-            store_order.append(result_name)
-            targit_to_result[_norm(cleaned)] = result_name
-            log.info(f"  + {cleaned}  →  short='{short}', opened='{today_str}' (default metadata; edit STORE_MAPPING for precise values)")
+            prev = prev_store_meta.get(result_name)
+            if prev:
+                # ΗΔΗ καταχωρημένο σε προηγούμενο τρέξιμο — διατηρείται ΑΥΤΟΥΣΙΟ.
+                result_to_meta[result_name] = {
+                    'short': prev.get('short') or short or cleaned,
+                    'targit': cleaned,
+                    'store_type': prev.get('store_type') or 'In Line',
+                    'opening_date': prev.get('opening_date') or today_str,
+                    'is_new': bool(prev.get('is_new', True)),
+                }
+                m = result_to_meta[result_name]
+                log.info(f"  = {cleaned}  →  διατηρείται από το υπάρχον data.json "
+                         f"(opened='{m['opening_date']}', is_new={m['is_new']}, type='{m['store_type']}')")
+            else:
+                result_to_meta[result_name] = {
+                    'short': short or cleaned,
+                    'targit': cleaned,
+                    'store_type': 'In Line',  # default — manually edit STORE_MAPPING for precise type
+                    'opening_date': today_str,
+                    'is_new': True,
+                }
+                log.info(f"  + {cleaned}  →  ΝΕΟ: short='{short}', opened='{today_str}' (default metadata; edit STORE_MAPPING for precise values)")
         # Re-apply the mapping with the new entries
         data['StoreResult'] = data['Store'].apply(lambda s: targit_to_result.get(_norm(s)))
     data = data[data['StoreResult'].notna()].copy()
@@ -717,6 +882,7 @@ def build_data_json(data, budget, hourly_data=None):
     if deliveras_count > 0:
         log.info(f"  Merging {deliveras_count} DELIVERAS rows into {DELIVERAS_MERGE_INTO}")
         data.loc[data['Channel'] == 'DELIVERAS', 'Channel'] = DELIVERAS_MERGE_INTO
+    data = normalize_channels(data, 'daily')
 
     # Map each row to its Sales Type (View B), Type (View A), and keep raw Channel
     data['SalesType'] = data['Channel'].map(CHANNEL_TO_SALESTYPE)
@@ -734,8 +900,12 @@ def build_data_json(data, budget, hourly_data=None):
 
     def to_records(df, col_idx_map, col_name):
         out = []
+        dropped = {}
         for _, row in df.iterrows():
             if row[col_name] not in col_idx_map:
+                # ΠΟΤΕ σιωπηλά: εδώ ακριβώς εξαφανιζόταν το "STORE ORDER".
+                k = str(row[col_name])
+                dropped[k] = dropped.get(k, 0.0) + float(row['Sales'])
                 continue
             out.append([
                 row['Date'].strftime('%Y-%m-%d'),
@@ -744,6 +914,8 @@ def build_data_json(data, budget, hourly_data=None):
                 round(float(row['Sales']), 2),
                 int(row['TCs']),
             ])
+        for k, amt in sorted(dropped.items(), key=lambda kv: -kv[1]):
+            log.error(f"  [{col_name}] ΑΠΟΡΡΙΦΘΗΚΕ '{k}': {amt:,.2f} EUR ΔΕΝ μπαίνουν στο dashboard")
         return out
 
     records_st   = to_records(daily_st,   st_idx,   'SalesType')
