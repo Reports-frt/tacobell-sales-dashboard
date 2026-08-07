@@ -6205,7 +6205,9 @@ function fcDayProj(si, ds) {
 
 // Aggregate day forecast over the store filter. Actual for past days.
 function fcDayAgg(ds, storeFilter) {
-  let s = 0, t = 0, anyRun = false;
+  // projS/runS: πόσος από τον ΠΡΟΒΛΕΠΟΜΕΝΟ τζίρο βγαίνει από κάθε μονοπάτι.
+  // Το χρειάζεται η ζώνη αβεβαιότητας: το «νέο κατάστημα» έχει διπλάσιο σφάλμα.
+  let s = 0, t = 0, anyRun = false, projS = 0, runS = 0;
   const isPast = ds <= LATEST;
   const a = isPast ? dailyStore.get(ds) : null;
   for (let si = 0; si < STORES.length; si++) {
@@ -6214,9 +6216,28 @@ function fcDayAgg(ds, storeFilter) {
     if (isPast) continue;  // past day, no data — skip (closed)
     const p = fcDayProj(si, ds);
     s += p.s; t += p.t;
-    if (p.basis === 'runrate') anyRun = true;
+    projS += p.s;
+    if (p.basis === 'runrate') { anyRun = true; runS += p.s; }
   }
-  return { s, t, actual: isPast, anyRun };
+  return { s, t, actual: isPast, anyRun, projS, runS };
+}
+
+// ===== Ζώνη αβεβαιότητας της πρόβλεψης =====
+// Μέσο απόλυτο σφάλμα σε ΕΠΙΠΕΔΟ ΑΛΥΣΙΔΑΣ, μετρημένο με backtest: κόβουμε τα
+// δεδομένα σε παλιότερη ημερομηνία, τρέχουμε την ΙΔΙΑ fcDayProj, συγκρίνουμε με
+// το τι έγινε. 11 αφετηρίες (τέλος κάθε μήνα 06/2025-04/2026), KFC Ελλάδας.
+//   ώριμο κατάστημα (ly×mom):  3.5 3.6 4.8 4.5 4.5 5.5   -> περίβλημα παρακάτω
+//   νέο κατάστημα (runrate):   4.4 5.4 8.7 8.9 9.2 11.3
+// Τα περιβλήματα είναι ΜΟΝΟΤΟΝΑ: το σφάλμα δεν μικραίνει με την απόσταση, όποια
+// πτώση δείχνει το δείγμα είναι θόρυβος (9-11 παρατηρήσεις ανά ορίζοντα).
+// ⚠ Τα νούμερα είναι του KFC — το Taco Bell δεν έχει αρκετό ιστορικό για δικό
+// του backtest. Ίδια λογική με τη δανεισμένη εποχικότητα.
+const FC_BAND_MATURE = [0, 3, 4, 5, 5, 5, 6];
+const FC_BAND_NEW    = [0, 4, 5, 9, 9, 9, 11];
+function fcBandPct(monthsAhead, runShare) {
+  const h = Math.max(1, Math.min(6, monthsAhead));
+  const w = Math.max(0, Math.min(1, runShare || 0));
+  return FC_BAND_MATURE[h] + (FC_BAND_NEW[h] - FC_BAND_MATURE[h]) * w;
 }
 
 function fcDayBudget(ds, storeFilter) {
@@ -6290,14 +6311,26 @@ function renderForecast(R) {
   function monthProj(m) {
     const dim = new Date(year, m, 0).getDate();
     let s = 0, t = 0, anyRun = false, actualDays = 0, projDays = 0;
+    let projS = 0, runS = 0;
     for (let d = 1; d <= dim; d++) {
       const ds = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const r = fcDayAgg(ds, sf);
       s += r.s; t += r.t;
+      projS += r.projS || 0; runS += r.runS || 0;
       if (r.actual) actualDays++; else projDays++;
       if (r.anyRun) anyRun = true;
     }
-    return { s, t, anyRun, actualDays, projDays };
+    return { s, t, anyRun, actualDays, projDays, projS, runS };
+  }
+
+  // Ζώνη του μήνα: σταθμισμένη στο μείγμα μονοπατιών ΚΑΙ στο πόσο του μήνα
+  // είναι όντως πρόβλεψη (ο τρέχων μήνας είναι ως επί το πλείστον πραγματικός,
+  // άρα η αβεβαιότητά του είναι μικρή - δεν πρέπει να δείχνει ±4%).
+  function monthBand(m, p) {
+    if (!p.projDays || p.s <= 0) return null;
+    const runShare = p.projS > 0 ? p.runS / p.projS : 0;
+    const pct = fcBandPct(m - curMonth, runShare) * (p.projS / p.s);
+    return pct >= 0.5 ? pct : null;
   }
 
   // Η δανεισμένη εποχικότητα είναι ΥΠΟΘΕΣΗ. Υπόθεση που δεν φαίνεται στην οθόνη
@@ -6412,7 +6445,13 @@ function renderForecast(R) {
     const isPast = m < curMonth;
     html += `<tr ${isCur ? 'style="background: rgba(112,32,130,0.06)"' : (isPast ? 'style="opacity:0.75"' : '')}>
       <td><strong>${FC_MONTH_GR[m]}</strong>${isCur ? ` <span style="font-size:9px;color:var(--text-2)">(${p.actualDays} actual + ${p.projDays} proj)</span>` : ''}${isPast ? ' <span style="font-size:9px;color:var(--text-2)">(actual)</span>' : ''}${p.anyRun && !isPast ? ' <span title="Περιλαμβάνει store σε run-rate basis (χωρίς LY)" style="font-size:9px">🆕</span>' : ''}</td>
-      <td><strong>${fmtK(p.s)}</strong></td>
+      <td><strong>${fmtK(p.s)}</strong>${(() => {
+        const bd = monthBand(m, p);
+        if (bd == null) return '';
+        const lo = fmtK(p.s * (1 - bd / 100)), hi = fmtK(p.s * (1 + bd / 100));
+        return ` <span style="font-size:9px;color:var(--text-2);font-weight:400;cursor:help"
+          title="Ζώνη αβεβαιότητας ±${bd.toFixed(1)}% (${lo} — ${hi}). Μέσο σφάλμα από backtest 11 αφετηριών: ώριμα καταστήματα 3-6%, νέα χωρίς περσινά 4-11%, ανάλογα με την απόσταση του μήνα. Αφορά μόνο το προβλεπόμενο μέρος του μήνα.">±${Math.round(bd)}%</span>`;
+      })()}</td>
       <td>${b.s > 0 ? fmtK(b.s) : '—'}</td>
       <td>${dPct(p.s, b.s)}</td>
       <td>${ly.s > 0 ? fmtK(ly.s) : '—'}</td>
