@@ -5788,7 +5788,7 @@ function wxOverviewHTML(R) {
   return `<div class="panel-section">
     <div class="section-title"><span>🌦 Ακραίος καιρός — επίδραση στις πωλήσεις</span>
       <span class="meta">όλοι οι μήνες · ${years[0]}–${years[years.length - 1]}</span></div>
-    <div class="table-wrap"><table class="data-table"><thead><tr>
+    <div class="my-table-wrap"><table class="my-table"><thead><tr>
       <th style="text-align:left">Φαινόμενο</th><th>Πωλήσεις</th><th>Συναλλαγές</th><th>Δείγμα</th>
       ${years.map(y => `<th>${y}</th>`).join('')}<th>Σύνολο ημερών</th>
     </tr></thead><tbody>${rows}</tbody></table></div>
@@ -5922,7 +5922,7 @@ function heatSectionHTML(R, hours) {
       <span><span style="display:inline-block;width:14px;height:2px;background:var(--text-2)"></span> κανονικές θερινές ημέρες</span>
       <span>μερίδιο τζίρου ανά ώρα (%)</span>
     </div>
-    <div class="table-wrap" style="margin-top:12px"><table class="data-table"><thead><tr>
+    <div class="my-table-wrap" style="margin-top:12px"><table class="my-table"><thead><tr>
       <th style="text-align:left">Ομάδα ημερών</th><th>Ημέρες-καταστήματος</th><th>13:00–17:00</th><th>19:00–23:00</th>
     </tr></thead><tbody>
       ${row('Κανονικές θερινές', groups.normal.length, aN, eN)}
