@@ -1108,6 +1108,23 @@ def git_push_data_json(json_data):
     # ===== Step B: Merge with existing data.json (preserves historical) =====
     json_data = merge_with_existing(json_data, json_path)
 
+    # ===== Σήμανση ημερών καύσωνα (ΜΟΝΟ ένδειξη/ανάλυση, ΠΟΤΕ στην πρόβλεψη) =====
+    # ⚠ ΜΕΤΑ ΤΗ ΣΥΓΧΩΝΕΥΣΗ, ΟΧΙ ΠΡΙΝ. Το build_output βλέπει μόνο το εύρος της
+    # ΝΕΑΣ πηγής (2024-12-30+), ενώ το ιστορικό του dashboard ξεκινά 2023-01-02.
+    # Χτισμένο νωρίτερα, η σήμανση έχανε ΔΥΟ ΟΛΟΚΛΗΡΑ ΚΑΛΟΚΑΙΡΙΑ σιωπηλά
+    # (913 ημέρες-καταστήματος -> 290). Αποτυχία εδώ ΔΕΝ ρίχνει το pipeline.
+    try:
+        import heatwave
+        heat = heatwave.build_heat_block(
+            json_data['meta']['stores'],
+            os.path.join(CONFIG["repo_path"], 'index.html'),
+            os.path.join(CONFIG["repo_path"], '_work'),
+            json_data['meta']['first_date'], json_data['meta']['latest_date'], log)
+        if heat:
+            json_data['heat'] = heat
+    except Exception as e:
+        log.error(f"  [heat] παραλείφθηκε: {e}")
+
     # ===== Step C: Pre-write validation =====
     ok, issues = validate_data_json_structure(json_data)
     if not ok:

@@ -863,6 +863,18 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
 .delta.flat, .pct.flat { color: var(--neutral); background: rgba(100,116,139,0.12); }
 
 /* ============== TABS ============== */
+/* ΚΥΜΑ ΚΑΥΣΩΝΑ — σήμανση ημέρας */
+.heat-badge { display:inline-block; margin-left:5px; padding:1px 5px; border-radius:9px;
+  font-size:10px; font-weight:700; white-space:nowrap; cursor:help; vertical-align:1px; }
+.heat-badge.heat-ban  { background:rgba(239,68,68,.16);  color:#ef4444; }
+.heat-badge.heat-wave { background:rgba(249,115,22,.14); color:#f97316; }
+.heat-panel { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px; }
+.heat-stat { background:var(--bg-2); border:1px solid var(--border); border-radius:10px; padding:12px 14px; }
+.heat-stat .v { font-size:22px; font-weight:800; font-variant-numeric:tabular-nums; }
+.heat-stat .l { font-size:11px; color:var(--text-2); margin-top:2px; }
+.heat-delta-neg { color:#ef4444; } .heat-delta-pos { color:#22c55e; }
+.heat-note { font-size:11.5px; color:var(--text-2); line-height:1.55; margin-top:10px; }
+
 .tabs-wrap {
   background: var(--bg-1);
   border: 1px solid var(--border);
@@ -1901,6 +1913,18 @@ const STORE_GEO = {
   'TB ΧΑΛΑΝΔΡΙ':      { lat: 38.0217, lng: 23.8000, addr: 'Χαλάνδρι', region: 'Βόρεια Προάστια' },
   'TB ΑΜΠΕΛΟΚΗΠΟΙ':   { lat: 37.9885, lng: 23.7520, addr: 'Πανόρμου, Αμπελόκηποι', region: 'Κέντρο Αθήνας' },
   'TB ΚΥΨΕΛΗ':        { lat: 38.0030, lng: 23.7400, addr: 'Κυψέλη', region: 'Κέντρο Αθήνας' },
+
+  // ⚠ ΤΑ ΠΑΡΑΠΑΝΩ ΚΛΕΙΔΙΑ ΔΕΝ ΤΑΙΡΙΑΖΟΥΝ ΜΕ ΚΑΝΕΝΑ ΚΑΤΑΣΤΗΜΑ (07/08/2026).
+  // Το meta.stores λέει 'TACO BELL- ΧΑΛΑΝΔΡΙ', εδώ έγραφε 'TB ΧΑΛΑΝΔΡΙ' -> 0/4
+  // αντιστοιχίσεις. Η storeDistanceKm γύριζε ΠΑΝΤΑ Infinity, οπότε ο έλεγχος
+  // `distance === Infinity` έκοβε ΚΑΘΕ ζεύγος και η ανάλυση αλληλοκανιβαλισμού
+  // δεν έβγαζε ποτέ αποτέλεσμα — σιωπηλά, χωρίς κανένα σφάλμα στην οθόνη.
+  // Τα παλιά κλειδιά μένουν ως αβλαβή συνώνυμα.
+  'TACO BELL- ΧΑΛΑΝΔΡΙ':    { lat: 38.0217, lng: 23.8000, addr: 'Χαλάνδρι', region: 'Βόρεια Προάστια' },
+  // ΠΡΟΣΟΧΗ: ξεκινά με ΕΛΛΗΝΙΚΟ Ταυ (U+03A4), όχι λατινικό T — όπως στο Targit.
+  'ΤACO BELL- MALL':   { lat: 38.0446, lng: 23.7896, addr: 'The Mall Athens, Μαρούσι', region: 'Βόρεια Προάστια' },
+  'TACO BELL- ΑΜΠΕΛΟΚΗΠΟΙ': { lat: 37.9885, lng: 23.7520, addr: 'Πανόρμου, Αμπελόκηποι', region: 'Κέντρο Αθήνας' },
+  'TACO BELL-ΚΥΨΕΛΗ':       { lat: 38.0030, lng: 23.7400, addr: 'Κυψέλη', region: 'Κέντρο Αθήνας' },
 };
 
 // Compute distance in km between two stores (Haversine formula)
@@ -2170,6 +2194,58 @@ setTimeout(function renderYesterdayStrip() {
     el.style.display = 'flex';
   } catch (e) { /* never break the app for the strip */ }
 }, 0);
+
+// =====================================================================
+// ΚΥΜΑ ΚΑΥΣΩΝΑ — σήμανση ημερών (ΜΟΝΟ ένδειξη/ανάλυση)
+// ---------------------------------------------------------------------
+// Μετρημένο στα ΙΔΙΑ αυτά δεδομένα (Αττική, Ιούν-Σεπ 2023-2026): σε ημέρα
+// >=37°C ο τζίρος ΜΕΤΑΤΟΠΙΖΕΤΑΙ — 13:00-17:00 -3,4 μονάδες, 19:00-23:00 +2,4.
+// Ομάδα ελέγχου (30-35°C χωρίς κύμα): -0,5 / +0,0 — η ζέστη ΜΟΝΗ ΤΗΣ δεν κάνει
+// τίποτα. Αιτία: κρατική παύση υπαίθριων εργασιών 13:00-17:00 (διανομείς).
+// ⚠ ΠΟΤΕ στην πρόβλεψη τζίρου: η περσινή ίδια μέρα ήταν κι αυτή ζεστή, άρα η
+//   ζέστη είναι ΗΔΗ μέσα στη βάση. Δοκιμάστηκε εκεί και απορρίφθηκε.
+// =====================================================================
+const HEAT = RAW.heat || null;
+const HEAT_KIND_LABEL = { ban: 'Καύσωνας', wave: 'Κύμα καύσωνα' };
+const HEAT_COLOR = { ban: '#ef4444', wave: '#f97316' };
+const _heatCache = new Map();
+
+/** Ημέρες καύσωνα για ένα σύνολο καταστημάτων: date -> {kind, tmax, n, of} */
+function heatDays(storeFilter) {
+  if (!HEAT || !HEAT.by_store) return new Map();
+  const sel = [];
+  for (let si = 0; si < STORES.length; si++) {
+    if (storeFilter && !storeFilter.has(si)) continue;
+    if (HEAT.by_store[si]) sel.push(si);
+  }
+  const key = sel.join(',');
+  if (_heatCache.has(key)) return _heatCache.get(key);
+  const out = new Map();
+  sel.forEach(si => {
+    const days = HEAT.by_store[si];
+    for (const ds in days) {
+      const kind = days[ds][0], tmax = days[ds][1];
+      const cur = out.get(ds);
+      if (!cur) out.set(ds, { kind, tmax, n: 1, of: sel.length });
+      else {
+        cur.n++;
+        if (kind === 'ban') cur.kind = 'ban';   // 'ban' υπερισχύει του 'wave'
+        if (tmax != null && (cur.tmax == null || tmax > cur.tmax)) cur.tmax = tmax;
+      }
+    }
+  });
+  _heatCache.set(key, out);
+  return out;
+}
+
+function heatBadge(info) {
+  if (!info) return '';
+  const t = info.tmax != null ? ' ' + info.tmax + '°C' : '';
+  const scope = info.of > 1 ? ' · ' + info.n + '/' + info.of + ' καταστήματα' : '';
+  return '<span class="heat-badge heat-' + info.kind + '" title="' +
+    HEAT_KIND_LABEL[info.kind] + t + scope +
+    ' — η ζήτηση μετατοπίζεται από το απόγευμα (13:00-17:00) στο βράδυ (19:00-23:00)">🌡' + t + '</span>';
+}
 
 // =====================================================================
 // HOURLY DATA (optional)
@@ -4340,6 +4416,21 @@ function renderTrend(R) {
         svg += `<g><circle cx="${x}" cy="${H-PAD.b-4}" r="4" fill="#f59e0b" opacity="0.9"/><title>LY ${lyDate(p.date, STATE.ly_mode)}: ${hLY} (πέρσι αργία, φέτος όχι)</title></g>`;
       }
     });
+    // ===== Ημέρες καύσωνα — ίδιο μοτίβο με τις αργίες, δική τους σειρά =====
+    if (HEAT) {
+      const hd = heatDays(R && R.storeFilter);
+      data.forEach((p, i) => {
+        if (!p.date) return;
+        const info = hd.get(p.date);
+        if (!info) return;
+        const x = xScale(i), c = HEAT_COLOR[info.kind];
+        const t = info.tmax != null ? ` ${info.tmax}°C` : '';
+        const scope = info.of > 1 ? ` (${info.n}/${info.of} καταστήματα)` : '';
+        svg += `<line x1="${x}" y1="${PAD.t}" x2="${x}" y2="${H-PAD.b}" stroke="${c}" stroke-width="1" stroke-dasharray="1 4" opacity="0.45"/>`;
+        svg += `<g><rect x="${x-4}" y="${PAD.t+14}" width="8" height="8" rx="2" fill="${c}"/>` +
+               `<title>${p.date}: ${HEAT_KIND_LABEL[info.kind]}${t}${scope}\nΗ ζήτηση μετατοπίζεται από 13:00-17:00 προς 19:00-23:00</title></g>`;
+      });
+    }
     let lx = PAD.l + 10;
     accessors.forEach(a => {
       svg += `<rect x="${lx}" y="${PAD.t+6}" width="14" height="3" fill="${a.color}" stroke-dasharray="${a.dash||""}"/>`;
@@ -5546,7 +5637,142 @@ function renderHourly(R) {
     }
   } catch (e) { /* additive */ }
 
+  // ===== ΚΥΜΑ ΚΑΥΣΩΝΑ — ωριαία καμπύλη σε καύσωνα vs κανονικές ημέρες =====
+  // Το φαινόμενο ΕΙΝΑΙ σχήμα, όχι αριθμός: εδώ φαίνεται ως μετατόπιση της
+  // καμπύλης. Οι δύο σειρές είναι ΜΕΡΙΔΙΑ (% της ημέρας), όχι ευρώ — αλλιώς
+  // θα συγκρίναμε και το μέγεθος της ημέρας μαζί με το σχήμα της.
+  try { html += heatSectionHTML(R, hours); } catch (e) { /* additive */ }
+
   root.innerHTML = html;
+}
+
+/** Η ενότητα «Κύμα καύσωνα» της καρτέλας Hourly (χαρακτηριστικά 2 & 3). */
+function heatSectionHTML(R, hours) {
+  if (!HEAT || !HAS_DATE_HOURLY) return '';
+  const hd = heatDays(R && R.storeFilter);
+  if (!hd.size) return '';
+
+  // ⚠ ΑΝΑ ΚΑΤΑΣΤΗΜΑ, ΟΧΙ ΑΝΑ ΑΛΥΣΙΔΑ. Πρώτη εκδοχή χαρακτήριζε ΟΛΗ την ημέρα
+  // ως καύσωνα αν το ΞΕΠΕΡΝΟΥΣΕ έστω ΕΝΑ κατάστημα — έτσι μια καυτή μέρα στη
+  // Λάρισα μόλυνε την καμπύλη της Αθήνας και η μετατόπιση έβγαινε -1,5 αντί
+  // -3,4 μονάδες. Κάθε κατάστημα συγκρίνεται με τον ΔΙΚΟ ΤΟΥ καιρό.
+  // Μόνο θερινοί μήνες: η χειμερινή καμπύλη έχει άλλο σχήμα εξ ορισμού.
+  const dates = HOURLY.dates || [];
+  const perSD = new Map();                       // "si|date" -> {tot, h}
+  HOURLY.records_hsd.forEach(r => {
+    const ds = dates[r[0]];
+    if (!ds) return;
+    const m = +ds.slice(5, 7);
+    if (m < 6 || m > 9) return;
+    if (R && R.storeFilter && !R.storeFilter.has(r[1])) return;
+    const k = r[1] + '|' + ds;
+    let d = perSD.get(k);
+    if (!d) { d = { si: r[1], ds, tot: 0, h: {} }; perSD.set(k, d); }
+    d.h[r[2]] = (d.h[r[2]] || 0) + r[3];
+    d.tot += r[3];
+  });
+
+  const groups = { ban: [], wave: [], normal: [] };
+  const affectedDates = new Set();
+  perSD.forEach(d => {
+    if (d.tot < 300) return;                     // κατάστημα-ημέρα χωρίς ουσιαστικό τζίρο
+    const own = HEAT.by_store[d.si] && HEAT.by_store[d.si][d.ds];
+    const kind = own ? own[0] : 'normal';
+    groups[kind].push(d);
+    if (own) affectedDates.add(d.ds);
+  });
+  // ⚠ ΚΑΤΩΦΛΙ ΕΙΛΙΚΡΙΝΕΙΑΣ. Σύγκριση καμπυλών πάνω σε λίγες ημέρες είναι
+  // θόρυβος με σχήμα γραφήματος. Το Taco Bell έχει πωλήσεις από 09/2025, άρα
+  // ένα μόνο (μισό) καλοκαίρι: εκεί δηλώνουμε ρητά ότι δεν φτάνουν, αντί να
+  // δείξουμε νούμερο που πείθει. Η σήμανση ημέρας (badge/Trend) μένει — αυτή
+  // είναι γεγονός ανά ημέρα, δεν είναι στατιστικό.
+  const MIN_HEAT_DAYS = 20;
+  if (groups.ban.length + groups.wave.length < MIN_HEAT_DAYS) {
+    return `<div class="panel-section">
+      <div class="section-title"><span>🌡 Κύμα καύσωνα</span>
+        <span class="meta">≥${HEAT.thresholds.ban}°C = καύσωνας</span></div>
+      <div class="heat-note">Εντοπίστηκαν <strong>${groups.ban.length + groups.wave.length}</strong>
+        ημέρες-καταστήματος με καύσωνα ή κύμα σε ${affectedDates.size} ημερομηνίες —
+        <strong>δεν επαρκούν</strong> για σύγκριση ωριαίας καμπύλης (χρειάζονται ≥${MIN_HEAT_DAYS}).
+        Οι ημέρες σημαίνονται κανονικά στο γράφημα Trend· η ανάλυση μετατόπισης θα εμφανιστεί
+        μόλις μαζευτεί ένα ολόκληρο καλοκαίρι δεδομένων.</div>
+    </div>`;
+  }
+
+  const shareCurve = (arr) => {
+    const out = {}; hours.forEach(h => out[h] = 0);
+    arr.forEach(d => hours.forEach(h => { out[h] += (d.h[h] || 0) / d.tot; }));
+    hours.forEach(h => out[h] = arr.length ? out[h] / arr.length * 100 : 0);
+    return out;
+  };
+  const zone = (arr, a, b) => arr.length
+    ? arr.reduce((s, d) => s + Object.keys(d.h).reduce((x, h) => (+h >= a && +h < b ? x + d.h[h] : x), 0) / d.tot, 0) / arr.length * 100
+    : null;
+
+  const cN = shareCurve(groups.normal), cB = shareCurve(groups.ban);
+  const aN = zone(groups.normal, 13, 17), eN = zone(groups.normal, 19, 23);
+  const aB = zone(groups.ban, 13, 17), eB = zone(groups.ban, 19, 23);
+  const aW = zone(groups.wave, 13, 17), eW = zone(groups.wave, 19, 23);
+
+  // --- γράφημα: δύο καμπύλες μεριδίου ---
+  const W = 720, H = 210, PAD = { l: 38, r: 12, t: 14, b: 26 };
+  const maxV = Math.max(...hours.map(h => Math.max(cN[h], cB[h]))) * 1.12 || 1;
+  const xs = i => PAD.l + (W - PAD.l - PAD.r) * (hours.length < 2 ? 0 : i / (hours.length - 1));
+  const ys = v => PAD.t + (H - PAD.t - PAD.b) * (1 - v / maxV);
+  let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;height:auto;display:block">`;
+  svg += `<rect x="${xs(hours.indexOf(13) < 0 ? 0 : hours.indexOf(13))}" y="${PAD.t}" width="${Math.max(0, xs(hours.indexOf(17) < 0 ? 0 : hours.indexOf(17)) - xs(hours.indexOf(13) < 0 ? 0 : hours.indexOf(13)))}" height="${H - PAD.t - PAD.b}" fill="#ef4444" opacity="0.07"/>`;
+  svg += `<text x="${xs(Math.max(0, hours.indexOf(13)))+4}" y="${PAD.t+11}" font-size="9" fill="#ef4444">παύση υπαίθριων εργασιών</text>`;
+  for (let g = 0; g <= 3; g++) {
+    const v = maxV * g / 3, y = ys(v);
+    svg += `<line x1="${PAD.l}" y1="${y}" x2="${W-PAD.r}" y2="${y}" stroke="var(--border)" stroke-width="1"/>`;
+    svg += `<text x="${PAD.l-5}" y="${y+3}" text-anchor="end" font-size="9" fill="var(--text-2)">${v.toFixed(0)}%</text>`;
+  }
+  [[cN, 'var(--text-2)', 1.8, '4 3'], [cB, HEAT_COLOR.ban, 2.6, '']].forEach(([c, col, w, dash]) => {
+    svg += `<path fill="none" stroke="${col}" stroke-width="${w}" stroke-dasharray="${dash}" d="${
+      hours.map((h, i) => (i ? 'L' : 'M') + xs(i) + ',' + ys(c[h])).join(' ')}"/>`;
+  });
+  hours.forEach((h, i) => {
+    if (h % 2) return;
+    svg += `<text x="${xs(i)}" y="${H-8}" text-anchor="middle" font-size="9" fill="var(--text-2)">${String(h).padStart(2,'0')}</text>`;
+  });
+  svg += '</svg>';
+
+  const dl = (v) => v == null ? '—' : (v >= 0 ? '+' : '') + v.toFixed(1).replace('.', ',');
+  const cls = (v) => v == null ? '' : (v < 0 ? 'heat-delta-neg' : 'heat-delta-pos');
+  const row = (label, n, a, e) => !n ? '' :
+    `<tr><td style="text-align:left">${label}</td><td>${n}</td>` +
+    `<td>${a == null ? '—' : a.toFixed(1).replace('.', ',') + '%'} <span class="${cls(a - aN)}">${aN != null && a != null ? dl(a - aN) : ''}</span></td>` +
+    `<td>${e == null ? '—' : e.toFixed(1).replace('.', ',') + '%'} <span class="${cls(e - eN)}">${eN != null && e != null ? dl(e - eN) : ''}</span></td></tr>`;
+
+  return `<div class="panel-section">
+    <div class="section-title"><span>🌡 Κύμα καύσωνα — μετατόπιση ωριαίας ζήτησης</span>
+      <span class="meta">Ιούν–Σεπ · ≥${HEAT.thresholds.ban}°C = καύσωνας</span></div>
+    <div class="heat-panel">
+      <div class="heat-stat"><div class="v ${cls(aB - aN)}">${dl(aB - aN)} μον.</div>
+        <div class="l">13:00–17:00 σε καύσωνα<br>(παύση υπαίθριων εργασιών)</div></div>
+      <div class="heat-stat"><div class="v ${cls(eB - eN)}">${dl(eB - eN)} μον.</div>
+        <div class="l">19:00–23:00 σε καύσωνα<br>(η ζήτηση επιστρέφει το βράδυ)</div></div>
+      <div class="heat-stat"><div class="v">${groups.ban.length} + ${groups.wave.length}</div>
+        <div class="l">ημέρες-καταστήματος σε καύσωνα + κύμα<br>από ${perSD.size} θερινές (${affectedDates.size} ξεχωριστές ημερομηνίες)</div></div>
+    </div>
+    <div style="margin-top:14px">${svg}</div>
+    <div style="display:flex;gap:16px;font-size:11px;color:var(--text-2);margin-top:4px">
+      <span><span style="display:inline-block;width:14px;height:2px;background:${HEAT_COLOR.ban};vertical-align:3px"></span> ημέρες καύσωνα</span>
+      <span><span style="display:inline-block;width:14px;height:2px;background:var(--text-2)"></span> κανονικές θερινές ημέρες</span>
+      <span>μερίδιο τζίρου ανά ώρα (%)</span>
+    </div>
+    <div class="table-wrap" style="margin-top:12px"><table class="data-table"><thead><tr>
+      <th style="text-align:left">Ομάδα ημερών</th><th>Ημέρες-καταστήματος</th><th>13:00–17:00</th><th>19:00–23:00</th>
+    </tr></thead><tbody>
+      ${row('Κανονικές θερινές', groups.normal.length, aN, eN)}
+      ${row('Κύμα (' + HEAT.thresholds.warm + '–' + HEAT.thresholds.ban + '°C δίπλα σε καύσωνα)', groups.wave.length, aW, eW)}
+      ${row('Καύσωνας (≥' + HEAT.thresholds.ban + '°C)', groups.ban.length, aB, eB)}
+    </tbody></table></div>
+    <div class="heat-note">Ο τζίρος <strong>δεν χάνεται — μετατοπίζεται</strong>. Σε καύσωνα επιβάλλεται
+      παύση υπαίθριων εργασιών 13:00–17:00 που καλύπτει τους διανομείς με δίκυκλο, και η ζήτηση
+      επιστρέφει το βράδυ. Χρήσιμο για <strong>βάρδιες και ετοιμασία</strong>, όχι για πρόβλεψη τζίρου:
+      η περσινή αντίστοιχη μέρα ήταν κι αυτή ζεστή, οπότε η ζέστη είναι ήδη μέσα στην πρόβλεψη.</div>
+  </div>`;
 }
 
 // =====================================================================
