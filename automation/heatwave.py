@@ -303,18 +303,22 @@ def build_heat_block(store_order, index_html_path, work_dir, first_date, last_da
     # με ΚΟΙΝΟ ευρετήριο ημερομηνιών (ώστε να μην επαναλαμβάνονται 22 φορές).
     # Μετρημένο κόστος: ~142 KB, δηλαδή 1,0% του data.json.
     dates = sorted({ds for p in pts for ds in (wx.get(p) or {}) if ds >= first_date})
-    daily = {}
+    daily, daily_rain = {}, {}
     if dates:
         pos = {ds: i for i, ds in enumerate(dates)}
         for i, p in per_store.items():
             days = wx.get(p) or {}
             arr = [None] * len(dates)
+            rn = [None] * len(dates)
             for ds, v in days.items():
                 j = pos.get(ds)
                 if j is not None:
                     arr[j] = v.get('tmax')
+                    rn[j] = v.get('rain')
             if any(x is not None for x in arr):
                 daily[str(i)] = arr
+            if any(x for x in rn):
+                daily_rain[str(i)] = rn
 
     if log:
         log.info('  [heat] %d καταστήματα · ημέρες-καταστήματος: %s'
@@ -333,4 +337,7 @@ def build_heat_block(store_order, index_html_path, work_dir, first_date, last_da
         # ⚠ ΠΡΟΣΘΕΤΙΚΟ. Καταναλωτές που δεν το ξέρουν δεν επηρεάζονται —
         # το labour tool διαβάζει μόνο `effects` και `by_store`.
         'daily_tmax': {'dates': dates, 'by_store': daily},
+        # ⚠ ΙΔΙΟ ευρετήριο ημερομηνιών με το `daily_tmax.dates` — δεν
+        # επαναλαμβάνεται (13 KB). Βροχή σε mm, `null` όπου λείπει μέτρηση.
+        'daily_rain': {'by_store': daily_rain},
     }

@@ -2308,6 +2308,40 @@ function dayTmax(ds, storeFilter) {
   return best;
 }
 
+/**
+ * Βροχή σε mm για τα επιλεγμένα καταστήματα — **ΔΙΑΜΕΣΟΣ**, όχι μέγιστο.
+ *
+ * ⚠ ΑΣΥΜΜΕΤΡΙΑ ΜΕ ΤΗ ΘΕΡΜΟΚΡΑΣΙΑ, ΚΑΙ ΕΙΝΑΙ ΣΚΟΠΙΜΗ. Το dayTmax() δίνει
+ * ΜΕΓΙΣΤΟ γιατί ο καύσωνας είναι ακρότητα: θέλουμε να ξέρουμε αν ΚΑΠΟΥ
+ * ξεπεράστηκε το κατώφλι. Η βροχή είναι τοπική: με 22 καταστήματα σε όλη την
+ * Ελλάδα, το μέγιστο σημαίνει «έβρεξε κάπου» και ισχύει σχεδόν πάντα.
+ * ΜΕΤΡΗΜΕΝΟ σε 1.321 ημέρες — ημέρες με >=1mm:
+ *     μέγιστο 46%  ·  μέσος όρος 25%  ·  ΔΙΑΜΕΣΟΣ 19%
+ * Παράδειγμα 10/01/2026: μέγιστο 50,0mm (ένα κατάστημα) — διάμεσος 2,0mm.
+ * Με φίλτρο ενός καταστήματος η διάμεσος είναι η τιμή του, δηλαδή ακριβής.
+ */
+function dayRain(ds, storeFilter) {
+  const dt = HEAT && HEAT.daily_tmax, dr = HEAT && HEAT.daily_rain;
+  if (!dt || !dr || !dr.by_store) return null;
+  let idx = _tmaxCache.get('#idx');
+  if (!idx) { idx = new Map(dt.dates.map((d, i) => [d, i])); _tmaxCache.set('#idx', idx); }
+  const j = idx.get(ds);
+  if (j === undefined) return null;
+  const vals = [];
+  for (let si = 0; si < STORES.length; si++) {
+    if (storeFilter && !storeFilter.has(si)) continue;
+    const a = dr.by_store[si];
+    if (a && a[j] != null) vals.push(a[j]);
+  }
+  if (!vals.length) return null;
+  vals.sort((x, y) => x - y);
+  const m = vals.length >> 1;
+  return vals.length % 2 ? vals[m] : (vals[m - 1] + vals[m]) / 2;
+}
+
+/** Κάτω από αυτό είναι ψιχάλα — θα γέμιζε το πλέγμα νούμερα χωρίς νόημα. */
+const RAIN_SHOW_MM = 1.0;
+
 /** Χρώμα κελιού ανά θερμοκρασία — μπλε στο κρύο, κόκκινο στον καύσωνα. */
 function tmaxColor(t) {
   if (t == null) return 'transparent';
@@ -4779,14 +4813,22 @@ function _calendarHeatmap(R) {
         // για τις ακραίες (by_store). Το tooltip λέει ΚΑΙ ΤΑ ΔΥΟ σε κάθε λειτουργία,
         // ώστε η εναλλαγή χρώματος να μη χάνει ποτέ πληροφορία.
         const wxT = dayTmax(ds, R.storeFilter);
+        const wxR = dayRain(ds, R.storeFilter);
         const wxK = hdCal.get(ds);
         const wxIcon = wxK ? (HEAT_ICON[wxK.kind] || '') : '';
         const wxTip = (wxT != null ? ' · ' + wxT.toFixed(1) + '°C' : '')
+            + (wxR != null && wxR >= 0.1 ? ' · ' + wxR.toFixed(1) + ' mm βροχή' : '')
             + (wxK ? ' ' + (HEAT_ICON[wxK.kind] || '') + ' ' + HEAT_KIND_LABEL[wxK.kind] : '');
+        // Τα mm μπαίνουν ΜΟΝΟ πάνω από το κατώφλι: κάτω από 1mm είναι ψιχάλα
+        // και θα εμφανιζόταν στο 53% των ημερών αντί για 19%.
+        const rainLine = (wxMode && wxR != null && wxR >= RAIN_SHOW_MM)
+            ? '<span style="font-size:6px;color:#dbeafe;text-shadow:0 0 2px rgba(0,0,0,.8)">'
+              + (wxR >= 10 ? Math.round(wxR) : wxR.toFixed(1)) + 'mm</span>'
+            : '';
 
         const sub = wxMode
-            ? (wxT != null ? '<span style="font-size:7px;color:#fff;text-shadow:0 0 2px rgba(0,0,0,.6)">'
-                 + Math.round(wxT) + '°</span>' : '')
+            ? ((wxT != null ? '<span style="font-size:7px;color:#fff;text-shadow:0 0 2px rgba(0,0,0,.6)">'
+                 + Math.round(wxT) + '°</span>' : '') + rainLine)
             : (hol ? '<span style="font-size:7px">🎉</span>'
                 : (future
                     ? (proj != null ? '<span style="font-size:7px;color:var(--text-2)">~' + Math.round(proj / 1000) + 'K</span>' : '')
@@ -4801,7 +4843,13 @@ function _calendarHeatmap(R) {
         const badge = wxIcon
             ? '<span style="position:absolute;top:0;right:1px;font-size:7px;line-height:1">' + wxIcon + '</span>'
             : '';
-        cells += '<div title="' + title + wxTip + '" style="position:relative;aspect-ratio:1;border-radius:4px;background:' + bgc + ';' + bd + ';display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:9px;' + opc + '">' +
+        // ⚠ `line-height:1` ΜΟΝΟ στη λειτουργία καιρού, όπου οι γραμμές είναι
+        // ΤΡΕΙΣ (ημέρα + °C + mm). Με το προεπιλεγμένο ύψος γραμμής χρειάζονται
+        // 30,8px σε κελί 31px στο στενότερο πλάτος (πλαίσιο 230px) — δηλαδή
+        // περιθώριο 0,2px, που το τρώει η πρώτη διαφορετική γραμματοσειρά.
+        // Με line-height:1 πέφτει στα 22px και περισσεύουν 9.
+        const lh = wxMode ? 'line-height:1;' : '';
+        cells += '<div title="' + title + wxTip + '" style="position:relative;aspect-ratio:1;border-radius:4px;background:' + bgc + ';' + bd + ';display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-size:9px;' + lh + opc + '">' +
           badge + '<span style="font-weight:600' + (wxMode && wxT != null ? ';color:#fff;text-shadow:0 0 2px rgba(0,0,0,.6)' : '') + '">' + d + '</span>' + sub + '</div>';
       }
       grids += '<div style="flex:1;min-width:230px;max-width:320px"><div style="font-size:11px;font-weight:700;margin-bottom:6px;text-align:center">' + MON[mo.m] + ' ' + mo.y + '</div>' +
@@ -4821,8 +4869,11 @@ function _calendarHeatmap(R) {
           + (wxMode ? '🌤 Καιρός' : '📊 Απόδοση') + '</button>'
         : '';
     const legend = wxMode
-        ? 'Χρώμα = μέγιστη θερμοκρασία (μπλε κρύο → κόκκινο καύσωνας), ο αριθμός κάτω = °C. '
-          + '🌡 καύσωνας · 🌧 έντονη βροχή · ❄ χιόνι. Οι μελλοντικές ημέρες είναι πρόβλεψη (~16 ημέρες).'
+        ? 'Χρώμα = μέγιστη θερμοκρασία (μπλε κρύο → κόκκινο καύσωνας), ο αριθμός = °C, '
+          + 'από κάτω τα mm βροχής (πάνω από ' + RAIN_SHOW_MM + 'mm). '
+          + '🌡 καύσωνας · 🌧 έντονη βροχή · ❄ χιόνι. Οι μελλοντικές ημέρες είναι πρόβλεψη (~16 ημέρες). '
+          + 'Η θερμοκρασία είναι η ΜΕΓΙΣΤΗ των επιλεγμένων καταστημάτων, η βροχή η ΔΙΑΜΕΣΟΣ '
+          + '— το μέγιστο βροχής σημαίνει «έβρεξε κάπου» και ισχύει σχεδόν πάντα.'
         : 'Ο αριθμός στο κελί = % απόκλιση από το αναμενόμενο. 🎉 = αργία. '
           + 'Το εικονίδιο πάνω δεξιά = ακραίος καιρός· πάτα «Καιρός» για θερμοκρασία σε κάθε μέρα.';
     return '<div class="panel-section">' +

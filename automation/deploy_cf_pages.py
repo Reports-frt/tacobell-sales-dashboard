@@ -36,8 +36,8 @@ GATE_GET_NEW = 'if (localStorage.getItem(__SESSION_KEY__) === "1" || sessionStor
 GATE_ANCHOR = 'try { sessionStorage.setItem(__SESSION_KEY__, "1"); } catch(e) {}'
 GATE_HOOK = ('\n      try { localStorage.setItem(__SESSION_KEY__, "1"); } catch(e) {}'
              '\n      try { localStorage.setItem("tb_agent_pw", pw); } catch(e) {}')
-SW_OLD_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v11';"
-SW_NEW_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v12';  // v12: Cloudflare (imerologio kairou)"
+SW_OLD_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v12';"
+SW_NEW_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v13';  // v13: Cloudflare (vroxi se mm)"
 SW_SHELL_ANCHOR = "  './index.html',"
 
 LOG_FILE = REPO / "_work" / "cf_deploy.log"
