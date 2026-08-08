@@ -49,6 +49,9 @@ for h in _handlers:
     log.addHandler(h)
 
 DRY = '--dry-run' in sys.argv
+# Γραψε το data.json τοπικα ΑΛΛΑ μη δημοσιευσεις — για επαληθευση στην οθονη
+# πριν φυγει σε 22 καταστηματα.
+NO_PUBLISH = '--no-publish' in sys.argv
 
 
 # ──────────────────────────────── git ────────────────────────────────
@@ -181,6 +184,10 @@ def main():
         if os.path.exists(tmp):
             os.remove(tmp)
         return 1
+
+    if NO_PUBLISH:
+        log.info('  --no-publish: γραφτηκε ΤΟΠΙΚΑ, χωρις git και χωρις deploy.')
+        return 0
 
     # ── git ──
     try:

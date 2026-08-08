@@ -296,9 +296,31 @@ def build_heat_block(store_order, index_html_path, work_dir, first_date, last_da
             return (by_point.get(p) or {}).get(ds) if p else None
         effects = measure_effects(store_days, kind_of)
 
+    # ── ΗΜΕΡΗΣΙΑ ΘΕΡΜΟΚΡΑΣΙΑ ΓΙΑ ΚΑΘΕ ΜΕΡΑ, όχι μόνο τις ακραίες ──────────
+    # Το `by_store` κρατά ΜΟΝΟ τις επηρεαζόμενες ημέρες (2.679 από 29.062):
+    # σωστό για τη σήμανση, αλλά με αυτό ΔΕΝ γίνεται ημερολόγιο καιρού — τα
+    # 91% των κελιών θα ήταν κενά. Εδώ βγαίνει συμπαγής σειρά ανά κατάστημα
+    # με ΚΟΙΝΟ ευρετήριο ημερομηνιών (ώστε να μην επαναλαμβάνονται 22 φορές).
+    # Μετρημένο κόστος: ~142 KB, δηλαδή 1,0% του data.json.
+    dates = sorted({ds for p in pts for ds in (wx.get(p) or {}) if ds >= first_date})
+    daily = {}
+    if dates:
+        pos = {ds: i for i, ds in enumerate(dates)}
+        for i, p in per_store.items():
+            days = wx.get(p) or {}
+            arr = [None] * len(dates)
+            for ds, v in days.items():
+                j = pos.get(ds)
+                if j is not None:
+                    arr[j] = v.get('tmax')
+            if any(x is not None for x in arr):
+                daily[str(i)] = arr
+
     if log:
         log.info('  [heat] %d καταστήματα · ημέρες-καταστήματος: %s'
                  % (len(by_store), ', '.join('%s %d' % kv for kv in sorted(counts.items()))))
+        log.info('  [heat] ημερήσια θερμοκρασία: %d ημέρες × %d καταστήματα'
+                 % (len(dates), len(daily)))
         for k, v in sorted(effects.items(), key=lambda kv: kv[1]['s']):
             log.info('  [heat] επίδραση %-5s n=%-5d πωλήσεις %+.2f%% συναλλαγές %+.2f%%'
                      % (k, v['n'], v['s'] * 100, v['t'] * 100))
@@ -308,4 +330,7 @@ def build_heat_block(store_order, index_html_path, work_dir, first_date, last_da
         'by_store': by_store,
         'effects': effects,
         'through': max((max(v) for v in by_store.values() if v), default=None),
+        # ⚠ ΠΡΟΣΘΕΤΙΚΟ. Καταναλωτές που δεν το ξέρουν δεν επηρεάζονται —
+        # το labour tool διαβάζει μόνο `effects` και `by_store`.
+        'daily_tmax': {'dates': dates, 'by_store': daily},
     }

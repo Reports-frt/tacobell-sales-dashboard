@@ -7,7 +7,7 @@
 //   - Icons & manifest: cache-first
 // =====================================================================
 
-const CACHE_VERSION = 'tacobell-dashboard-v10';  // v8: akraios kairos (index.html allakse)
+const CACHE_VERSION = 'tacobell-dashboard-v11';  // v11: imerologio kairou (index.html allakse)
 const APP_SHELL = [
   './',
   './index.html',
