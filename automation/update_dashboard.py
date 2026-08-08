@@ -1115,11 +1115,18 @@ def git_push_data_json(json_data):
     # (913 ημέρες-καταστήματος -> 290). Αποτυχία εδώ ΔΕΝ ρίχνει το pipeline.
     try:
         import heatwave
+        # πωλήσεις/συναλλαγές ανά κατάστημα-ημέρα -> ΜΕΤΡΗΣΗ των επιδράσεων
+        _sd = {}
+        for _r in json_data['records_st']:
+            _d = _sd.setdefault(_r[1], {})
+            _p = _d.get(_r[0]) or (0.0, 0)
+            _d[_r[0]] = (_p[0] + _r[3], _p[1] + _r[4])
         heat = heatwave.build_heat_block(
             json_data['meta']['stores'],
             os.path.join(CONFIG["repo_path"], 'index.html'),
             os.path.join(CONFIG["repo_path"], '_work'),
-            json_data['meta']['first_date'], json_data['meta']['latest_date'], log)
+            json_data['meta']['first_date'], json_data['meta']['latest_date'], log,
+            store_days=_sd)
         if heat:
             json_data['heat'] = heat
     except Exception as e:

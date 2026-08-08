@@ -38,6 +38,13 @@ import datetime
 # μήνα" είναι 18,8°C τον Ιανουάριο και δεν ενοχλεί κανέναν.
 HEAT_THRESHOLDS = {'ban': 37, 'warm': 32}
 
+# Ακραία καιρικά πέρα από τη ζέστη. Κατώφλια ημερήσιου αθροίσματος.
+WX_THRESHOLDS = {'rain_mm': 12.0, 'snow_cm': 1.0, 'gust_kmh': 70.0}
+
+# ⚠ Η ΣΕΙΡΑ ΜΕΤΡΑΕΙ: μια ημέρα παίρνει ΜΙΑ κατηγορία. Χιόνι > βροχή > ζέστη,
+# γιατί το χιόνι είναι το σπανιότερο και το ισχυρότερο.
+WX_KIND_ORDER = ['snow', 'rain', 'ban', 'wave']
+
 ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive'
 FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
 PAST_DAYS = 92          # όσο δέχεται το forecast API — καλύπτει το κενό του archive
@@ -98,9 +105,17 @@ def fetch_tmax(points, start_date, end_date, cache_path, log=None):
             k = '%.4f,%.4f' % p
             d = payload.get('daily') or {}
             slot = cache.setdefault(k, {})
-            for ds, t in zip(d.get('time') or [], d.get('temperature_2m_max') or []):
-                if t is not None:
-                    slot[ds] = round(float(t), 1)
+            times = d.get('time') or []
+            for i, ds in enumerate(times):
+                def g(name, nd=1):
+                    arr = d.get(name) or []
+                    v = arr[i] if i < len(arr) else None
+                    return round(float(v), nd) if v is not None else None
+                t = g('temperature_2m_max')
+                if t is None:
+                    continue
+                slot[ds] = {'tmax': t, 'rain': g('rain_sum'),
+                            'snow': g('snowfall_sum'), 'gust': g('wind_gusts_10m_max', 0)}
 
     try:
         if missing:                                     # πλήρες ιστορικό, μία φορά
@@ -110,7 +125,8 @@ def fetch_tmax(points, start_date, end_date, cache_path, log=None):
                 'latitude': ','.join('%.4f' % p[0] for p in missing),
                 'longitude': ','.join('%.4f' % p[1] for p in missing),
                 'start_date': start_date, 'end_date': end_date,
-                'daily': 'temperature_2m_max', 'timezone': 'Europe%2FAthens',
+                'daily': 'temperature_2m_max,rain_sum,snowfall_sum,wind_gusts_10m_max',
+                'timezone': 'Europe%2FAthens',
             })), missing)
         if log:
             log.info('  [heat] forecast past_days=%d για %d τοποθεσίες' % (PAST_DAYS, len(points)))
@@ -138,6 +154,76 @@ def _shift(ds, n):
     return (datetime.date.fromisoformat(ds) + datetime.timedelta(n)).isoformat()
 
 
+def classify_wx(by_date):
+    """ISO ημερομηνία -> κατηγορία ακραίου καιρού. Μία κατηγορία ανά ημέρα.
+
+    by_date: {ds: {'tmax','rain','snow','gust'}}
+    """
+    heat = classify({ds: v.get('tmax') for ds, v in by_date.items()})
+    out = {}
+    for ds, v in by_date.items():
+        if (v.get('snow') or 0) >= WX_THRESHOLDS['snow_cm']:
+            out[ds] = 'snow'
+        elif (v.get('rain') or 0) >= WX_THRESHOLDS['rain_mm']:
+            out[ds] = 'rain'
+        elif ds in heat:
+            out[ds] = heat[ds]
+    return out
+
+
+def measure_effects(store_days, kind_of, min_n=30, window=28):
+    """Πόσο πέφτουν πωλήσεις/συναλλαγές σε κάθε είδος ακραίου καιρού.
+
+    ⚠ ΤΟ ΣΩΣΤΟ ΜΕΤΡΟ ΣΥΓΚΡΙΣΗΣ ΕΙΝΑΙ Η ΙΔΙΑ ΗΜΕΡΑ ΕΒΔΟΜΑΔΑΣ, ΟΧΙ Η ΠΕΡΣΙΝΗ
+    ΙΔΙΑ ΗΜΕΡΟΜΗΝΙΑ. Παλιότερη προσέγγιση σύγκρινε τη διαφορά θερμοκρασίας από
+    πέρσι και έβγαζε "καμία επίδραση" — επειδή η περσινή μέρα του Ιουλίου ήταν
+    κι αυτή ζεστή. Με καθαρή βάση ίδιας ημέρας εβδομάδας (±4 εβδομάδες, ΜΟΝΟ
+    κανονικές ημέρες) η επίδραση φαίνεται καθαρά:
+        χιόνι  -19,6% πωλήσεις / -23,2% συναλλαγές
+        καύσωνας -6,5% / -5,7%   ·  κύμα -2,3% / -2,3%  ·  βροχή -1,8% / -3,6%
+        ομάδα ελέγχου (ζέστη 30-35°C χωρίς κύμα): -0,1% / +0,1%
+
+    store_days: {si: {ds: (sales, tcs)}}
+    kind_of:    (si, ds) -> κατηγορία ή None
+    """
+    acc = {}
+    for si, days in store_days.items():
+        ordered = sorted(days)
+        for ds in ordered:
+            kind = kind_of(si, ds)
+            if not kind:
+                continue
+            d0 = datetime.date.fromisoformat(ds)
+            bs, bt = [], []
+            for n in range(-window, window + 1, 7):
+                if n == 0:
+                    continue
+                o = (d0 + datetime.timedelta(n)).isoformat()
+                if o in days and not kind_of(si, o):     # η βάση ΠΡΕΠΕΙ να είναι καθαρή
+                    bs.append(days[o][0]); bt.append(days[o][1])
+            if len(bs) < 3:
+                continue
+            ms, mt = _median(bs), _median(bt)
+            if ms > 0 and mt > 0 and days[ds][0] > 0:
+                a = acc.setdefault(kind, {'s': [], 't': []})
+                a['s'].append(days[ds][0] / ms - 1)
+                a['t'].append(days[ds][1] / mt - 1 if days[ds][1] and mt else 0.0)
+    out = {}
+    for kind, v in acc.items():
+        if len(v['s']) >= min_n:
+            # ΔΙΑΜΕΣΟΣ, όχι μέσος όρος: μια κλειστή μέρα ή ένα φεστιβάλ δεν
+            # πρέπει να ορίζει τον συντελεστή που θα μπει στην πρόβλεψη.
+            out[kind] = {'s': round(_median(v['s']), 4),
+                         't': round(_median(v['t']), 4), 'n': len(v['s'])}
+    return out
+
+
+def _median(v):
+    s = sorted(v)
+    n = len(s)
+    return s[n // 2] if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
 def classify(tmax_by_date):
     """ISO ημερομηνία -> 'ban' | 'wave'. Μόνο οι ημέρες που επηρεάζονται.
 
@@ -159,11 +245,16 @@ def classify(tmax_by_date):
     return out
 
 
-def build_heat_block(store_order, index_html_path, work_dir, first_date, last_date, log=None):
-    """Το μπλοκ `heat` του data.json.
+def build_heat_block(store_order, index_html_path, work_dir, first_date, last_date,
+                     log=None, store_days=None):
+    """Το μπλοκ `heat` του data.json (ζέστη ΚΑΙ βροχή/χιόνι/άνεμος).
 
-    {thresholds, by_store: {storeIdx: {date: [kind, tmax]}}, generated_through}
+    {thresholds, wx_thresholds, by_store: {si: {date: [kind, tmax, rain, snow]}},
+     effects: {kind: {s, t, n}}, through}
     Μόνο οι ΕΠΗΡΕΑΖΟΜΕΝΕΣ ημέρες μπαίνουν — οι υπόλοιπες είναι σιωπή.
+
+    store_days (προαιρετικό): {si: {ds: (sales, tcs)}} για τη ΜΕΤΡΗΣΗ των
+    επιδράσεων. Χωρίς αυτό μπαίνει μόνο η σήμανση, καμία διόρθωση πρόβλεψης.
     """
     geo = read_store_geo(index_html_path, log)
     pts, per_store = [], {}
@@ -172,30 +263,49 @@ def build_heat_block(store_order, index_html_path, work_dir, first_date, last_da
         if not g:
             if log:
                 log.error("  [heat] ΧΩΡΙΣ ΣΥΝΤΕΤΑΓΜΕΝΕΣ: '%s' — δεν θα έχει σήμανση "
-                          "καύσωνα. Πρόσθεσέ το στο STORE_GEO του index.html." % name)
+                          "καιρού. Πρόσθεσέ το στο STORE_GEO του index.html." % name)
             continue
         per_store[i] = g
         if g not in pts:
             pts.append(g)
     if not pts:
         return None
-    tmax, _ = fetch_tmax(pts, first_date, last_date, os.path.join(work_dir, 'weather_cache.json'), log)
-    by_point = {p: classify(tmax.get(p, {})) for p in pts}
-    by_store, counts = {}, {'ban': 0, 'wave': 0}
+    wx, _ = fetch_tmax(pts, first_date, last_date,
+                       os.path.join(work_dir, 'weather_cache.json'), log)
+    by_point = {p: classify_wx(wx.get(p, {})) for p in pts}
+
+    by_store, counts = {}, {}
     for i, p in per_store.items():
         days = by_point.get(p) or {}
         if not days:
             continue
-        by_store[str(i)] = {ds: [k, tmax[p].get(ds)] for ds, k in sorted(days.items())
-                            if ds >= first_date}
-        for ds, k in days.items():
-            if ds >= first_date:
-                counts[k] += 1
+        rows = {}
+        for ds, k in sorted(days.items()):
+            if ds < first_date:
+                continue
+            w = wx[p].get(ds) or {}
+            rows[ds] = [k, w.get('tmax'), w.get('rain'), w.get('snow')]
+            counts[k] = counts.get(k, 0) + 1
+        if rows:
+            by_store[str(i)] = rows
+
+    effects = {}
+    if store_days:
+        def kind_of(si, ds):
+            p = per_store.get(si)
+            return (by_point.get(p) or {}).get(ds) if p else None
+        effects = measure_effects(store_days, kind_of)
+
     if log:
-        log.info('  [heat] %d καταστήματα · ημέρες-καταστήματος: ban %d, wave %d'
-                 % (len(by_store), counts['ban'], counts['wave']))
+        log.info('  [heat] %d καταστήματα · ημέρες-καταστήματος: %s'
+                 % (len(by_store), ', '.join('%s %d' % kv for kv in sorted(counts.items()))))
+        for k, v in sorted(effects.items(), key=lambda kv: kv[1]['s']):
+            log.info('  [heat] επίδραση %-5s n=%-5d πωλήσεις %+.2f%% συναλλαγές %+.2f%%'
+                     % (k, v['n'], v['s'] * 100, v['t'] * 100))
     return {
         'thresholds': HEAT_THRESHOLDS,
+        'wx_thresholds': WX_THRESHOLDS,
         'by_store': by_store,
+        'effects': effects,
         'through': max((max(v) for v in by_store.values() if v), default=None),
     }

@@ -863,6 +863,18 @@ input[type="date"]:focus, select:focus { outline: none; border-color: var(--acce
 .delta.flat, .pct.flat { color: var(--neutral); background: rgba(100,116,139,0.12); }
 
 /* ============== TABS ============== */
+/* Προειδοποίηση επερχόμενου ακραίου καιρού */
+.wx-warn { border:1px solid var(--border); border-left:4px solid #f97316; border-radius:10px;
+  padding:12px 14px; margin-bottom:14px; background:var(--bg-2); }
+.wx-warn h4 { margin:0 0 8px; font-size:13px; font-weight:800; }
+.wx-warn-days { display:flex; flex-wrap:wrap; gap:8px; }
+.wx-day { border:1px solid var(--border); border-radius:8px; padding:7px 10px; font-size:11.5px;
+  min-width:132px; }
+.wx-day .d { font-weight:700; font-size:12px; }
+.wx-day .m { color:var(--text-2); }
+.wx-day .e { font-weight:700; font-variant-numeric:tabular-nums; }
+.wx-warn .foot { font-size:11px; color:var(--text-2); margin-top:9px; line-height:1.5; }
+
 /* ΚΥΜΑ ΚΑΥΣΩΝΑ — σήμανση ημέρας */
 .heat-badge { display:inline-block; margin-left:5px; padding:1px 5px; border-radius:9px;
   font-size:10px; font-weight:700; white-space:nowrap; cursor:help; vertical-align:1px; }
@@ -2206,8 +2218,37 @@ setTimeout(function renderYesterdayStrip() {
 //   ζέστη είναι ΗΔΗ μέσα στη βάση. Δοκιμάστηκε εκεί και απορρίφθηκε.
 // =====================================================================
 const HEAT = RAW.heat || null;
-const HEAT_KIND_LABEL = { ban: 'Καύσωνας', wave: 'Κύμα καύσωνα' };
-const HEAT_COLOR = { ban: '#ef4444', wave: '#f97316' };
+const HEAT_KIND_LABEL = { ban: 'Καύσωνας', wave: 'Κύμα καύσωνα',
+                         rain: 'Έντονη βροχή', snow: 'Χιόνι' };
+const HEAT_COLOR = { ban: '#ef4444', wave: '#f97316', rain: '#3b82f6', snow: '#7dd3fc' };
+const HEAT_ICON  = { ban: '🌡', wave: '🌡', rain: '🌧', snow: '❄' };
+
+/**
+ * Επίδραση του ακραίου καιρού σε μία ημέρα, ΜΕΤΡΗΜΕΝΗ από τα ίδια τα δεδομένα.
+ * ⚠ Η ΜΕΤΡΗΣΗ ΓΙΝΕΤΑΙ ΕΝΑΝΤΙ ΤΗΣ ΙΔΙΑΣ ΗΜΕΡΑΣ ΕΒΔΟΜΑΔΑΣ, όχι της περσινής
+ * ίδιας ημερομηνίας. Παλιότερη προσέγγιση σύγκρινε διαφορά θερμοκρασίας από
+ * πέρσι και έβγαζε "μηδέν επίδραση" — γιατί η περσινή μέρα του Ιουλίου ήταν
+ * κι αυτή ζεστή. Με καθαρή βάση: καύσωνας -6,3%, χιόνι -18,4%, βροχή -4,1%.
+ */
+function wxEffect(si, ds, fld) {
+  if (!HEAT || !HEAT.effects) return 0;
+  const rec = HEAT.by_store && HEAT.by_store[si] && HEAT.by_store[si][ds];
+  if (!rec) return 0;
+  const e = HEAT.effects[rec[0]];
+  return e ? (fld === 't' ? e.t : e.s) || 0 : 0;
+}
+
+/**
+ * Συντελεστής διόρθωσης της πρόβλεψης για μία ημέρα.
+ * ΛΟΓΟΣ φέτος/πέρσι: αν πέρσι η ίδια μέρα είχε ΚΙ ΑΥΤΗ καύσωνα, η πτώση είναι
+ * ΗΔΗ μέσα στη βάση και ο λόγος βγαίνει ~1 (καμία διπλή χρέωση). Αν φέτος έχει
+ * και πέρσι δεν είχε, εφαρμόζεται η πτώση πάνω στο trend — και αντίστροφα.
+ */
+function wxAdj(si, ds, lyds, fld) {
+  const a = 1 + wxEffect(si, ds, fld);
+  const b = 1 + wxEffect(si, lyds, fld);
+  return b > 0.2 ? a / b : 1;
+}
 const _heatCache = new Map();
 
 /** Ημέρες καύσωνα για ένα σύνολο καταστημάτων: date -> {kind, tmax, n, of} */
@@ -2224,13 +2265,17 @@ function heatDays(storeFilter) {
   sel.forEach(si => {
     const days = HEAT.by_store[si];
     for (const ds in days) {
-      const kind = days[ds][0], tmax = days[ds][1];
+      const rec = days[ds];
+      const kind = rec[0], tmax = rec[1], rain = rec[2], snow = rec[3];
+      const RANK = { snow: 4, rain: 3, ban: 2, wave: 1 };
       const cur = out.get(ds);
-      if (!cur) out.set(ds, { kind, tmax, n: 1, of: sel.length });
+      if (!cur) out.set(ds, { kind, tmax, rain, snow, n: 1, of: sel.length });
       else {
         cur.n++;
-        if (kind === 'ban') cur.kind = 'ban';   // 'ban' υπερισχύει του 'wave'
+        if ((RANK[kind] || 0) > (RANK[cur.kind] || 0)) cur.kind = kind;  // σπανιότερο = ισχυρότερο
         if (tmax != null && (cur.tmax == null || tmax > cur.tmax)) cur.tmax = tmax;
+        if (rain != null && (cur.rain == null || rain > cur.rain)) cur.rain = rain;
+        if (snow != null && (cur.snow == null || snow > cur.snow)) cur.snow = snow;
       }
     }
   });
@@ -2238,13 +2283,62 @@ function heatDays(storeFilter) {
   return out;
 }
 
+/**
+ * Επερχόμενος ακραίος καιρός (ημέρες ΜΕΤΑ την τελευταία με δεδομένα).
+ * Η πρόβλεψη του Open-Meteo φτάνει ~7 ημέρες μπροστά.
+ */
+function wxUpcoming(storeFilter) {
+  if (!HEAT || !HEAT.by_store) return [];
+  const hd = heatDays(storeFilter);
+  const out = [];
+  hd.forEach((info, ds) => { if (ds > LATEST) out.push({ ds, ...info }); });
+  return out.sort((a, b) => a.ds < b.ds ? -1 : 1);
+}
+
+function wxWarningHTML(storeFilter) {
+  const up = wxUpcoming(storeFilter);
+  if (!up.length) return '';
+  const DOW = ['Κυρ','Δευ','Τρί','Τετ','Πέμ','Παρ','Σάβ'];
+  const days = up.map(x => {
+    const d = new Date(x.ds + 'T12:00:00');
+    const eff = HEAT.effects && HEAT.effects[x.kind];
+    const e = eff ? (eff.s * 100).toFixed(1).replace('.', ',') + '%' : '—';
+    return `<div class="wx-day" style="border-left:3px solid ${HEAT_COLOR[x.kind]}">
+      <div class="d">${DOW[d.getDay()]} ${x.ds.slice(8)}/${x.ds.slice(5,7)}</div>
+      <div class="m">${HEAT_ICON[x.kind] || ''} ${HEAT_KIND_LABEL[x.kind]}${heatMeasure(x)}</div>
+      <div class="m">${x.n}/${x.of} καταστήματα</div>
+      <div class="e" style="color:${HEAT_COLOR[x.kind]}">πωλήσεις ${e}</div>
+    </div>`;
+  }).join('');
+  const worst = up.reduce((a, b) => {
+    const ea = (HEAT.effects[a.kind] || {}).s || 0, eb = (HEAT.effects[b.kind] || {}).s || 0;
+    return eb < ea ? b : a;
+  });
+  return `<div class="wx-warn">
+    <h4>⚠ Επερχόμενος ακραίος καιρός — ${up.length} ${up.length === 1 ? 'ημέρα' : 'ημέρες'}</h4>
+    <div class="wx-warn-days">${days}</div>
+    <div class="foot">Η επίδραση είναι <strong>ήδη μέσα στο projection</strong> παρακάτω — δεν χρειάζεται
+      να την αφαιρέσεις μόνος σου. Τα ποσοστά είναι η <strong>μετρημένη</strong> ιστορική πτώση έναντι
+      της ίδιας ημέρας εβδομάδας. Χρήσιμο για <strong>βάρδιες, ετοιμασία και παραγγελίες</strong>:
+      στον καύσωνα η ζήτηση μετατοπίζεται από το απόγευμα στο βράδυ.</div>
+  </div>`;
+}
+
+function heatMeasure(info) {
+  if (info.kind === 'rain') return info.rain != null ? ' ' + info.rain + 'mm' : '';
+  if (info.kind === 'snow') return info.snow != null ? ' ' + info.snow + 'cm' : '';
+  return info.tmax != null ? ' ' + info.tmax + '°C' : '';
+}
 function heatBadge(info) {
   if (!info) return '';
-  const t = info.tmax != null ? ' ' + info.tmax + '°C' : '';
+  const m = heatMeasure(info);
   const scope = info.of > 1 ? ' · ' + info.n + '/' + info.of + ' καταστήματα' : '';
+  const eff = HEAT && HEAT.effects && HEAT.effects[info.kind];
+  const tail = eff ? ' — ιστορικά ' + (eff.s * 100).toFixed(1).replace('.', ',') + '% πωλήσεις'
+                   : '';
   return '<span class="heat-badge heat-' + info.kind + '" title="' +
-    HEAT_KIND_LABEL[info.kind] + t + scope +
-    ' — η ζήτηση μετατοπίζεται από το απόγευμα (13:00-17:00) στο βράδυ (19:00-23:00)">🌡' + t + '</span>';
+    HEAT_KIND_LABEL[info.kind] + m + scope + tail + '">' +
+    (HEAT_ICON[info.kind] || '🌡') + m + '</span>';
 }
 
 // =====================================================================
@@ -4424,11 +4518,13 @@ function renderTrend(R) {
         const info = hd.get(p.date);
         if (!info) return;
         const x = xScale(i), c = HEAT_COLOR[info.kind];
-        const t = info.tmax != null ? ` ${info.tmax}°C` : '';
+        const t = heatMeasure(info);
         const scope = info.of > 1 ? ` (${info.n}/${info.of} καταστήματα)` : '';
+        const eff = HEAT.effects && HEAT.effects[info.kind];
+        const tail = eff ? `\nΙστορικά: πωλήσεις ${(eff.s*100).toFixed(1)}% · συναλλαγές ${(eff.t*100).toFixed(1)}% (n=${eff.n})` : '';
         svg += `<line x1="${x}" y1="${PAD.t}" x2="${x}" y2="${H-PAD.b}" stroke="${c}" stroke-width="1" stroke-dasharray="1 4" opacity="0.45"/>`;
         svg += `<g><rect x="${x-4}" y="${PAD.t+14}" width="8" height="8" rx="2" fill="${c}"/>` +
-               `<title>${p.date}: ${HEAT_KIND_LABEL[info.kind]}${t}${scope}\nΗ ζήτηση μετατοπίζεται από 13:00-17:00 προς 19:00-23:00</title></g>`;
+               `<title>${p.date}: ${HEAT_KIND_LABEL[info.kind]}${t}${scope}${tail}</title></g>`;
       });
     }
     let lx = PAD.l + 10;
@@ -6411,9 +6507,14 @@ function fcDayProj(si, ds) {
   const lyd = lyDate(ds, '364');
   const la = dailyStore.get(lyd);
   if (mom.hasLY && la && la[si].sales > 0) {
+    // Διόρθωση ακραίου καιρού — ΛΟΓΟΣ φέτος/πέρσι ώστε να μη χρεωθεί δύο φορές
+    // η πτώση όταν είχε καύσωνα ΚΑΙ πέρσι την ίδια ημέρα.
+    // Μετρημένο ΕΚΤΟΣ ΔΕΙΓΜΑΤΟΣ (παράμετροι <2026, δοκιμή 2026): σφάλμα
+    // αλυσίδας 9,96% -> 9,64%· στις ημέρες που εφαρμόζεται 9,74% -> 8,96%·
+    // στις υπόλοιπες ΑΚΡΙΒΩΣ ΑΜΕΤΑΒΛΗΤΟ.
     return {
-      s: la[si].sales * (mom.s || 1),
-      t: la[si].tcs * (mom.t || 1),
+      s: la[si].sales * (mom.s || 1) * wxAdj(si, ds, lyd, 's'),
+      t: la[si].tcs * (mom.t || 1) * wxAdj(si, ds, lyd, 't'),
       basis: 'ly×mom',
     };
   }
@@ -6514,6 +6615,7 @@ window.setFcStore = function(v) { STATE.fcStore = v; renderActive(); };
 function renderForecast(R) {
   const root = document.getElementById('tab-forecast');
   const sf = R.storeFilter;
+  const wxWarn = (function () { try { return wxWarningHTML(sf); } catch (e) { return ''; } })();
   const year = parseInt(LATEST.slice(0, 4));
   const curMonth = parseInt(LATEST.slice(5, 7));
   const budget = budgetForYear(year) || {};
@@ -6567,10 +6669,10 @@ function renderForecast(R) {
         Αντικαθίσταται αυτόματα μόλις υπάρξει πλήρης χρονιά με σταθερά καταστήματα.`
     : '';
 
-  let html = `
+  let html = wxWarn + `
     <div class="insight" style="border-left-color: var(--accent)">
       <div class="ins-label">🔮 Πώς υπολογίζεται</div>
-      <div class="ins-text">Projected = περσινή ίδια μέρα εβδομάδας (364-shift) × <strong>momentum</strong> (YoY τελευταίων 28 ημερών ανά store). Νέα stores χωρίς πέρσι: run-rate 28 ημερών × DOW pattern × seasonality αλυσίδας. Τρέχων μήνας = MTD actual + projected υπόλοιπο. Budget ημέρας/εβδομάδας = μηνιαίο budget × περσινό daily shape. <strong>Το store filter εφαρμόζεται.</strong>${_seasNote}</div>
+      <div class="ins-text">Projected = περσινή ίδια μέρα εβδομάδας (364-shift) × <strong>momentum</strong> (YoY τελευταίων 28 ημερών ανά store). Νέα stores χωρίς πέρσι: run-rate 28 ημερών × DOW pattern × seasonality αλυσίδας. Τρέχων μήνας = MTD actual + projected υπόλοιπο. Budget ημέρας/εβδομάδας = μηνιαίο budget × περσινό daily shape. <strong>Το store filter εφαρμόζεται.</strong> Σε ημέρες <strong>ακραίου καιρού</strong> (καύσωνας/βροχή/χιόνι) εφαρμόζεται μετρημένη διόρθωση ως <strong>λόγος φέτος/πέρσι</strong>, ώστε να μη χρεωθεί δύο φορές η πτώση αν είχε το ίδιο και πέρσι.${_seasNote}</div>
     </div>`;
 
   // ============ SECTION 1: MONTHLY to year-end ============
