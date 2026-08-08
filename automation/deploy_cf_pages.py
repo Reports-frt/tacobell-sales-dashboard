@@ -1,10 +1,10 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Deploy the dashboard to Cloudflare Pages (parallel hosting next to GitHub Pages).
 
 Called at the end of the daily pipelines (sales + food) so the Cloudflare copy
 stays as fresh as the GitHub one. Idempotent: stages the current serve-files to
-a temp dir, applies the agent-chat overlay (the repo files stay untouched —
+a temp dir, applies the agent-chat overlay (the repo files stay untouched β€”
 GitHub Pages keeps serving WITHOUT the chat until the cutover), and deploys.
 
 Auth: wrangler's machine-wide OAuth (no PAT, no secrets in this repo).
@@ -29,15 +29,15 @@ SERVE_FILES = [
 OVERLAY_JS = REPO / "automation" / "cf_overlay" / "agent-chat.js"
 
 # --- chat overlay patches (must mirror what the cutover will bake in) --------
-# Remember-me: στο PWA το sessionStorage αδειαζει σε ΚΑΘΕ ανοιγμα του app,
-# οποτε ζηταγε κωδικο καθε φορα. Το localStorage επιβιωνει τα κλεισιματα.
+# Remember-me: ΟƒΟ„ΞΏ PWA Ο„ΞΏ sessionStorage Ξ±Ξ΄ΞµΞΉΞ±Ξ¶ΞµΞΉ ΟƒΞµ ΞΞ‘ΞΞ• Ξ±Ξ½ΞΏΞΉΞ³ΞΌΞ± Ο„ΞΏΟ… app,
+# ΞΏΟ€ΞΏΟ„Ξµ Ξ¶Ξ·Ο„Ξ±Ξ³Ξµ ΞΊΟ‰Ξ΄ΞΉΞΊΞΏ ΞΊΞ±ΞΈΞµ Ο†ΞΏΟΞ±. Ξ¤ΞΏ localStorage ΞµΟ€ΞΉΞ²ΞΉΟ‰Ξ½ΞµΞΉ Ο„Ξ± ΞΊΞ»ΞµΞΉΟƒΞΉΞΌΞ±Ο„Ξ±.
 GATE_GET_OLD = 'if (sessionStorage.getItem(__SESSION_KEY__) === "1") {'
 GATE_GET_NEW = 'if (localStorage.getItem(__SESSION_KEY__) === "1" || sessionStorage.getItem(__SESSION_KEY__) === "1") {'
 GATE_ANCHOR = 'try { sessionStorage.setItem(__SESSION_KEY__, "1"); } catch(e) {}'
 GATE_HOOK = ('\n      try { localStorage.setItem(__SESSION_KEY__, "1"); } catch(e) {}'
              '\n      try { localStorage.setItem("tb_agent_pw", pw); } catch(e) {}')
-SW_OLD_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v8';"
-SW_NEW_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v9';  // v9: Cloudflare (akraios kairos)"
+SW_OLD_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v10';"
+SW_NEW_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v11';  // v9: Cloudflare (akraios kairos)"
 SW_SHELL_ANCHOR = "  './index.html',"
 
 LOG_FILE = REPO / "_work" / "cf_deploy.log"
@@ -53,7 +53,7 @@ def insert_after(text, anchor, addition, label):
         log.info(f"  {label}: already applied")
         return text
     if anchor not in text:
-        log.warning(f"  {label}: anchor NOT FOUND — deploying unpatched")
+        log.warning(f"  {label}: anchor NOT FOUND β€” deploying unpatched")
         return text
     return text.replace(anchor, anchor + addition, 1)
 
@@ -64,7 +64,7 @@ def replace_once(text, old, new, label):
         log.info(f"  {label}: already applied")
         return text
     if old not in text:
-        log.warning(f"  {label}: anchor NOT FOUND — deploying unpatched")
+        log.warning(f"  {label}: anchor NOT FOUND β€” deploying unpatched")
         return text
     return text.replace(old, new, 1)
 
