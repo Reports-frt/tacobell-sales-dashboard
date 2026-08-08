@@ -5742,6 +5742,64 @@ function renderHourly(R) {
   root.innerHTML = html;
 }
 
+/**
+ * ΓΕΝΙΚΟΣ ΠΙΝΑΚΑΣ ΚΑΙΡΟΥ — όλα τα φαινόμενα, όλοι οι μήνες, όλα τα έτη.
+ * Το panel του καύσωνα από κάτω κοιτά ΜΟΝΟ Ιούν-Σεπ (εκεί ζει η μετατόπιση
+ * ωραρίου). Η βροχή και το χιόνι όμως είναι χειμερινά — χωρίς αυτόν τον πίνακα
+ * δεν φαίνονταν πουθενά, παρότι μετριούνται κανονικά.
+ */
+function wxOverviewHTML(R) {
+  if (!HEAT || !HEAT.effects || !Object.keys(HEAT.effects).length) return '';
+  const hd = heatDays(R && R.storeFilter);
+  if (!hd.size) return '';
+
+  // πλήθος ημερών ανά είδος × έτος (ΞΕΧΩΡΙΣΤΕΣ ημερομηνίες, όχι ανά κατάστημα)
+  const years = [], byKind = {};
+  hd.forEach((info, ds) => {
+    const y = ds.slice(0, 4);
+    if (years.indexOf(y) < 0) years.push(y);
+    (byKind[info.kind] = byKind[info.kind] || {})[y] = (byKind[info.kind][y] || 0) + 1;
+  });
+  years.sort();
+  const ORDER = ['snow', 'rain', 'ban', 'wave'];
+  const kinds = ORDER.filter(k => byKind[k]);
+  if (!kinds.length) return '';
+
+  const pct = v => v == null ? '—' : (v * 100).toFixed(1).replace('.', ',') + '%';
+  const rows = kinds.map(k => {
+    const e = HEAT.effects[k];
+    const tot = years.reduce((s, y) => s + (byKind[k][y] || 0), 0);
+    return `<tr>
+      <td style="text-align:left"><span style="color:${HEAT_COLOR[k]}">${HEAT_ICON[k]}</span>
+        <strong>${HEAT_KIND_LABEL[k]}</strong></td>
+      <td style="color:${e ? HEAT_COLOR[k] : 'inherit'};font-weight:700">${e ? pct(e.s) : '—'}</td>
+      <td style="color:${e ? HEAT_COLOR[k] : 'inherit'};font-weight:700">${e ? pct(e.t) : '—'}</td>
+      <td>${e ? e.n : '—'}</td>
+      ${years.map(y => `<td>${byKind[k][y] || '·'}</td>`).join('')}
+      <td><strong>${tot}</strong></td></tr>`;
+  }).join('');
+
+  const noEffect = kinds.filter(k => !HEAT.effects[k]);
+  const note = noEffect.length
+    ? `<div class="heat-note">⚠ Για <strong>${noEffect.map(k => HEAT_KIND_LABEL[k]).join(', ')}</strong>
+       δεν υπάρχουν ακόμα αρκετές ημέρες (χρειάζονται ≥30) — καμία διόρθωση δεν εφαρμόζεται
+       στην πρόβλεψη γι' αυτά, μπαίνει μόνη της όταν μαζευτούν.</div>` : '';
+
+  return `<div class="panel-section">
+    <div class="section-title"><span>🌦 Ακραίος καιρός — επίδραση στις πωλήσεις</span>
+      <span class="meta">όλοι οι μήνες · ${years[0]}–${years[years.length - 1]}</span></div>
+    <div class="table-wrap"><table class="data-table"><thead><tr>
+      <th style="text-align:left">Φαινόμενο</th><th>Πωλήσεις</th><th>Συναλλαγές</th><th>Δείγμα</th>
+      ${years.map(y => `<th>${y}</th>`).join('')}<th>Σύνολο ημερών</th>
+    </tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="heat-note">Η επίδραση μετριέται έναντι της <strong>ίδιας ημέρας εβδομάδας</strong>
+      (±4 εβδομάδες, μόνο κανονικές ημέρες) — όχι έναντι της περσινής ίδιας ημερομηνίας, που
+      κουβαλά τον δικό της καιρό. Εφαρμόζεται στο projection ως <strong>λόγος φέτος/πέρσι</strong>:
+      αν είχε το ίδιο φαινόμενο και πέρσι, η πτώση είναι ήδη στη βάση και δεν χρεώνεται δεύτερη φορά.</div>
+    ${note}
+  </div>`;
+}
+
 /** Η ενότητα «Κύμα καύσωνα» της καρτέλας Hourly (χαρακτηριστικά 2 & 3). */
 function heatSectionHTML(R, hours) {
   if (!HEAT || !HAS_DATE_HOURLY) return '';
@@ -5768,13 +5826,18 @@ function heatSectionHTML(R, hours) {
     d.tot += r[3];
   });
 
-  const groups = { ban: [], wave: [], normal: [] };
+  // ⚠ ΤΟ `other` ΕΙΝΑΙ ΑΠΑΡΑΙΤΗΤΟ. Όταν προστέθηκαν βροχή/χιόνι, το `kind`
+  // μπορούσε να είναι 'rain'/'snow' που ΔΕΝ υπήρχαν ως κλειδιά -> undefined.push
+  // -> ΟΛΗ η ενότητα εξαφανιζόταν σιωπηλά (την κατάπινε το try/catch).
+  // Δεν μπαίνουν όμως ούτε στο `normal`: μια βροχερή μέρα ΔΕΝ είναι κανονική
+  // βάση σύγκρισης — θα μόλυνε την καμπύλη αναφοράς του καύσωνα.
+  const groups = { ban: [], wave: [], normal: [], other: [] };
   const affectedDates = new Set();
   perSD.forEach(d => {
     if (d.tot < 300) return;                     // κατάστημα-ημέρα χωρίς ουσιαστικό τζίρο
     const own = HEAT.by_store[d.si] && HEAT.by_store[d.si][d.ds];
     const kind = own ? own[0] : 'normal';
-    groups[kind].push(d);
+    (groups[kind] || groups.other).push(d);
     if (own) affectedDates.add(d.ds);
   });
   // ⚠ ΚΑΤΩΦΛΙ ΕΙΛΙΚΡΙΝΕΙΑΣ. Σύγκριση καμπυλών πάνω σε λίγες ημέρες είναι
@@ -5784,7 +5847,9 @@ function heatSectionHTML(R, hours) {
   // είναι γεγονός ανά ημέρα, δεν είναι στατιστικό.
   const MIN_HEAT_DAYS = 20;
   if (groups.ban.length + groups.wave.length < MIN_HEAT_DAYS) {
-    return `<div class="panel-section">
+    // ⚠ ΚΑΙ ΕΔΩ ο γενικός πίνακας: το Taco Bell πέφτει ΠΑΝΤΑ σε αυτόν τον
+    // κλάδο (λίγες ημέρες καύσωνα) αλλά ΕΧΕΙ δεδομένα βροχής που αξίζουν.
+    return wxOverviewHTML(R) + `<div class="panel-section">
       <div class="section-title"><span>🌡 Κύμα καύσωνα</span>
         <span class="meta">≥${HEAT.thresholds.ban}°C = καύσωνας</span></div>
       <div class="heat-note">Εντοπίστηκαν <strong>${groups.ban.length + groups.wave.length}</strong>
@@ -5840,7 +5905,7 @@ function heatSectionHTML(R, hours) {
     `<td>${a == null ? '—' : a.toFixed(1).replace('.', ',') + '%'} <span class="${cls(a - aN)}">${aN != null && a != null ? dl(a - aN) : ''}</span></td>` +
     `<td>${e == null ? '—' : e.toFixed(1).replace('.', ',') + '%'} <span class="${cls(e - eN)}">${eN != null && e != null ? dl(e - eN) : ''}</span></td></tr>`;
 
-  return `<div class="panel-section">
+  return wxOverviewHTML(R) + `<div class="panel-section">
     <div class="section-title"><span>🌡 Κύμα καύσωνα — μετατόπιση ωριαίας ζήτησης</span>
       <span class="meta">Ιούν–Σεπ · ≥${HEAT.thresholds.ban}°C = καύσωνας</span></div>
     <div class="heat-panel">

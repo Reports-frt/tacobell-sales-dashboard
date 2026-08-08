@@ -16,6 +16,7 @@ KFC Sales Command Centre — Daily Auto-Update
 import os
 import sys
 import json
+import time
 import shutil
 import subprocess
 import logging
@@ -134,6 +135,38 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
+
+# ===========================================================================
+# ΕΛΕΓΧΟΣ ΦΡΕΣΚΑΔΑΣ EMAIL
+# ---------------------------------------------------------------------------
+# ⚠ ΓΙΑΤΙ ΥΠΑΡΧΕΙ: το Dispatch('Outlook.Application') ΞΕΚΙΝΑΕΙ το Outlook αν
+# είναι κλειστό, οπότε το pipeline ΔΕΝ σκάει ποτέ — διαβάζει όμως την τοπική
+# cache ΠΡΙΝ προλάβει να συγχρονιστεί και βρίσκει το ΧΘΕΣΙΝΟ report.
+# Μετρημένο 08/08/2026: τέσσερα συνεχόμενα τρεξίματα βρήκαν το email της 07/08
+# και έγραψαν latest_date = 2026-08-06, ΜΕ EXIT 0 ΚΑΙ "DONE" ΠΑΝΤΟΥ.
+# Χειρότερο είδος αποτυχίας: όλα δείχνουν εντάξει και τα νούμερα είναι χθεσινά.
+FRESH_RETRIES = 6        # ~2 λεπτά συνολικά — όσο θέλει ένα cold sync
+FRESH_WAIT_SEC = 20
+ALLOW_STALE = "--allow-stale" in sys.argv   # χειροκίνητο τρέξιμο πριν έρθει το report
+
+
+def _naive(dt):
+    return dt.replace(tzinfo=None) if hasattr(dt, "replace") else dt
+
+
+def is_today(dt):
+    return _naive(dt).date() == datetime.now().date()
+
+
+def force_outlook_sync(ns):
+    """Ζητά ρητά send/receive. Χωρίς αυτό περιμένουμε τον χρονιστή του Outlook."""
+    try:
+        ns.SendAndReceive(False)
+        return True
+    except Exception as e:
+        log.warning(f"  Δεν έγινε εξαναγκασμένος συγχρονισμός Outlook: {e}")
+        return False
+
 # ============================================================
 # STEP 1: GET LATEST ATTACHMENT FROM OUTLOOK
 # ============================================================
@@ -160,38 +193,74 @@ def get_latest_attachment():
     items = inbox.Items
     items.Sort("[ReceivedTime]", True)
 
-    found_email = None
-    checked = 0
-    for item in items:
-        checked += 1
-        if checked > 200:  # don't scan whole inbox forever
-            break
-        try:
-            received = item.ReceivedTime
-            if hasattr(received, 'replace'):
-                # Strip timezone for comparison (Outlook returns tz-aware)
-                received_naive = received.replace(tzinfo=None)
-            else:
-                received_naive = received
-            if received_naive < cutoff:
-                break  # all older items are beyond cutoff
+    def _scan(items):
+        found = None
+        checked = 0
+        for item in items:
+            checked += 1
+            if checked > 200:  # don't scan whole inbox forever
+                break
+            try:
+                received = item.ReceivedTime
+                if hasattr(received, 'replace'):
+                    # Strip timezone for comparison (Outlook returns tz-aware)
+                    received_naive = received.replace(tzinfo=None)
+                else:
+                    received_naive = received
+                if received_naive < cutoff:
+                    break  # all older items are beyond cutoff
 
-            sender = (item.SenderEmailAddress or "").lower()
-            subject = (item.Subject or "").lower()
+                sender = (item.SenderEmailAddress or "").lower()
+                subject = (item.Subject or "").lower()
 
-            # TB-only: subject MUST contain "tb" or "taco" anywhere
-            required = CONFIG.get("subject_must_contain", [])
-            if required and not any(s in subject for s in required):
+                # TB-only: subject MUST contain "tb" or "taco" anywhere
+                required = CONFIG.get("subject_must_contain", [])
+                if required and not any(s in subject for s in required):
+                    continue
+
+                if sender_filter in sender and subject_filter in subject:
+                    if item.Attachments.Count > 0:
+                        found = item
+                        log.info(f"Found email: '{item.Subject}' from {sender} ({received_naive})")
+                        break
+            except Exception as e:
+                log.warning(f"Error reading item: {e}")
                 continue
+        return found
 
-            if sender_filter in sender and subject_filter in subject:
-                if item.Attachments.Count > 0:
-                    found_email = item
-                    log.info(f"Found email: '{item.Subject}' from {sender} ({received_naive})")
-                    break
-        except Exception as e:
-            log.warning(f"Error reading item: {e}")
-            continue
+    # ΕΠΑΝΑΛΗΨΗ ΜΕΧΡΙ ΝΑ ΕΡΘΕΙ ΤΟ ΣΗΜΕΡΙΝΟ: το Outlook μπορεί μόλις να ξεκίνησε
+    # και να μην έχει κατεβάσει ακόμα τα σημερινά μηνύματα.
+    found_email = None
+    for attempt in range(1, FRESH_RETRIES + 1):
+        items = inbox.Items
+        items.Sort("[ReceivedTime]", True)
+        found_email = _scan(items)
+        if found_email is None or ALLOW_STALE:
+            break
+        if is_today(found_email.ReceivedTime):
+            break
+        got = _naive(found_email.ReceivedTime)
+        if attempt < FRESH_RETRIES:
+            log.warning(f"  Το νεότερο email είναι της {got:%d/%m %H:%M} — ΟΧΙ σημερινό. "
+                        f"Συγχρονισμός Outlook και προσπάθεια {attempt + 1}/{FRESH_RETRIES}...")
+            force_outlook_sync(outlook)
+            time.sleep(FRESH_WAIT_SEC)
+
+    if found_email is not None and not ALLOW_STALE and not is_today(found_email.ReceivedTime):
+        got = _naive(found_email.ReceivedTime)
+        log.error("=" * 70)
+        log.error(f"ΤΟ ΣΗΜΕΡΙΝΟ REPORT ΔΕΝ ΒΡΕΘΗΚΕ — το νεότερο είναι της {got:%d/%m/%Y %H:%M}")
+        log.error("Το dashboard ΔΕΝ ενημερώθηκε: θα έγραφε ΧΘΕΣΙΝΑ νούμερα δείχνοντας επιτυχία.")
+        log.error("ΤΙ ΝΑ ΕΛΕΓΞΕΙΣ: (1) είναι ανοιχτό και συγχρονισμένο το Outlook; "
+                  "(2) έφτασε το email των ~10:36; (3) για χειροκίνητο τρέξιμο με "
+                  "παλιό report: --allow-stale")
+        log.error("=" * 70)
+        send_failure_notification(
+            "Stale sales email",
+            f"Το νεότερο report είναι της {got:%d/%m/%Y %H:%M}, όχι σημερινό. "
+            f"Το dashboard δεν ενημερώθηκε για να μη γραφτούν χθεσινά νούμερα ως σημερινά."
+        )
+        sys.exit(2)
 
     if not found_email:
         log.error(f"No matching email found in last {CONFIG['max_age_days']} days.")
