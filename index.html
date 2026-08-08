@@ -1976,8 +1976,11 @@ const BUDGET_BY_YEAR = RAW.budget_by_year || {};
 function budgetForYear(year) {
   const y = String(year);
   if (BUDGET_BY_YEAR[y]) return BUDGET_BY_YEAR[y];
-  // Fallback: the flat BUDGET is the current (latest) year's budget
-  const budgetYear = parseInt((META.latest_date || "").slice(0, 4));
+  // Fallback: το flat BUDGET ανήκει στο έτος που ΔΗΛΩΝΕΙ το ίδιο το αρχείο
+  // (RAW.budget_year). ⚠ Παλιά υποθέταμε "το έτος της τελευταίας ημερομηνίας":
+  // την 1η Ιανουαρίου, με το περσινό αρχείο ακόμα στη θέση του, αυτό θα
+  // εμφάνιζε τα ΠΕΡΣΙΝΑ νούμερα ως φετινό budget — σιωπηλά και πειστικά.
+  const budgetYear = parseInt(RAW.budget_year || (META.latest_date || "").slice(0, 4));
   if (parseInt(y) === budgetYear) return BUDGET;
   return null;
 }
@@ -2992,6 +2995,10 @@ const STATE = {
   maturity: "all",        // all | same | new
   hourlyChannels: [],     // hourly tab channel multi-select (empty = όλα); keys: group keys ή channel names
   trendMetric: "sales",   // Daily Trend metric: sales | tcs | avg
+  // Σημάνσεις γεγονότων στο Trend (αργίες, ακραίος καιρός, αργότερα marketing).
+  // Default ON. Με το marketing οι σημάνσεις πληθαίνουν, ειδικά προς το τέλος
+  // του έτους — ο διακόπτης επιτρέπει να δεις την καθαρή καμπύλη.
+  trendEvents: true,
   fcMonth: null,          // Forecast tab: selected month for per-store table (null = next month auto)
   fcMetric: "sales",      // Forecast tab: sales | tcs
   hourlyMetric: "sales",  // Hourly tab: sales | tcs (tcs μόνο όταν HAS_HOURLY_TCS)
@@ -4496,7 +4503,10 @@ function renderTrend(R) {
       });
       svg += `<path fill="none" stroke="${a.color}" stroke-width="${a.width||2}" stroke-dasharray="${a.dash||""}" d="${d.trim()}" />`;
     });
-    // ===== Holiday markers (dynamic Greek holidays incl. Orthodox Easter) =====
+    // ===== Σημάνσεις γεγονότων — αργίες + ακραίος καιρός (+ μελλοντικά marketing).
+    // Ο διακόπτης «Γεγονότα» τις σβήνει ΟΛΕΣ μαζί: με το marketing η καμπύλη
+    // γεμίζει, ειδικά προς το τέλος του έτους.
+    if (STATE.trendEvents !== false) {
     data.forEach((p, i) => {
       if (!p.date) return;
       const x = xScale(i);
@@ -4527,6 +4537,7 @@ function renderTrend(R) {
                `<title>${p.date}: ${HEAT_KIND_LABEL[info.kind]}${t}${scope}${tail}</title></g>`;
       });
     }
+    }  // τέλος if (STATE.trendEvents)
     let lx = PAD.l + 10;
     accessors.forEach(a => {
       svg += `<rect x="${lx}" y="${PAD.t+6}" width="14" height="3" fill="${a.color}" stroke-dasharray="${a.dash||""}"/>`;
@@ -4570,13 +4581,30 @@ function renderTrend(R) {
     `<button class="trend-metric-chip ${metric === k ? 'active' : ''}" onclick="window.setTrendMetric('${k}')">${m.label}</button>`
   ).join("");
 
+  const evOn = STATE.trendEvents !== false;
+  const evCount = (function () {
+    try {
+      let n = 0;
+      const hd = HEAT ? heatDays(R.storeFilter) : new Map();
+      series.forEach(p => {
+        if (!p.date) return;
+        if (holidayName(p.date) || holidayName(lyDate(p.date, STATE.ly_mode)) || hd.get(p.date)) n++;
+      });
+      return n;
+    } catch (e) { return 0; }
+  })();
+
   root.innerHTML = `
     <div class="trend-metric-bar">
       <span class="tm-label">ΜΕΤΡΙΚΗ</span>
       ${chips}
+      <span style="flex:1"></span>
+      <button class="trend-metric-chip ${evOn ? 'active' : ''}" onclick="window.toggleTrendEvents()"
+        title="Αργίες, ακραίος καιρός και (μελλοντικά) ενέργειες marketing πάνω στην καμπύλη.
+Κλείσ' το για να δεις το καθαρό trend.">${evOn ? '👁' : '🚫'} Γεγονότα${evCount ? ' (' + evCount + ')' : ''}</button>
     </div>
     <div class="panel-section">
-      <div class="section-title"><span>Daily Trend — ${mdef.label}</span><span class="meta">${R.from} → ${R.to} · <span style="color:#a855f7">●</span> αργία φέτος · <span style="color:#f59e0b">●</span> αργία πέρσι (ίδια μέρα)</span></div>
+      <div class="section-title"><span>Daily Trend — ${mdef.label}</span><span class="meta">${R.from} → ${R.to}${evOn ? ' · <span style="color:#a855f7">●</span> αργία φέτος · <span style="color:#f59e0b">●</span> αργία πέρσι · <span style="color:#ef4444">▪</span> ακραίος καιρός' : ' · γεγονότα: κρυμμένα'}</span></div>
       <div class="chart-wrap">
         <div class="chart-title">Daily ${mdef.label}</div>
         ${chartSVG(series, acc1, mdef.fmt)}
@@ -5015,6 +5043,17 @@ window.setTrendMetric = function(m) {
   STATE.trendMetric = m;
   renderActive();
 };
+window.toggleTrendEvents = function() {
+  STATE.trendEvents = !STATE.trendEvents;
+  try { localStorage.setItem('trend_events', STATE.trendEvents ? '1' : '0'); } catch (e) {}
+  renderActive();
+};
+// Η επιλογή επιβιώνει τα reload — αλλιώς επανερχόταν σε ON σε κάθε ανανέωση
+// και ο χρήστης θα την ξανάκλεινε κάθε φορά.
+try {
+  const _te = localStorage.getItem('trend_events');
+  if (_te !== null) STATE.trendEvents = _te === '1';
+} catch (e) {}
 window.setHourlyChannel = function(sel) {
   if (sel === 'all') {
     STATE.hourlyChannels = [];

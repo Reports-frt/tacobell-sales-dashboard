@@ -682,6 +682,45 @@ TYPE_ORDER = ['STORE', 'DRIVE THRU', 'END-TO-END']
 SALESTYPE_ORDER = ['DINEIN', 'TAKEAWAY', 'DRIVE THRU', 'END-TO-END']  # for View B
 
 
+BUDGET_YEAR = None      # γεμίζει το load_budget από το ΙΔΙΟ το αρχείο
+
+
+def detect_budget_year(ws, fallback):
+    """Το έτος ΠΟΥ ΠΕΡΙΓΡΑΦΕΙ το budget, από τις κεφαλίδες του ίδιου του αρχείου.
+
+    ⚠ ΓΙΑΤΙ ΔΕΝ ΧΡΗΣΙΜΟΠΟΙΟΥΜΕ ΤΟ datetime.now().year: το budget μπαίνει
+    Νοέμβριο/Δεκέμβριο για τον ΕΠΟΜΕΝΟ χρόνο. Με ημερολογιακό έτος:
+      - Δεκ 2026 + αρχείο 2027  -> θα ΚΑΤΑΣΤΡΕΦΕ το budget_by_year['2026']
+      - Ιαν 2027 + αρχείο 2026  -> θα έγραφε τα νούμερα του 2026 ΩΣ 2027
+    Και τα δύο σιωπηλά, με σωστή εμφάνιση. Το αρχείο γράφει "Budget v1 2026"
+    στη γραμμή 2 — αυτό είναι η αλήθεια.
+    """
+    import re
+    years = {}
+    for r in range(1, min(ws.max_row + 1, 8)):
+        for c in range(1, min(ws.max_column + 1, 40)):
+            v = ws.cell(r, c).value
+            if v is None:
+                continue
+            m = re.search(r'[Bb]udget.{0,15}?(20[2-9]\d)', str(v))
+            if m:
+                years[m.group(1)] = years.get(m.group(1), 0) + 1
+    if not years:
+        log.error("  ΤΟ BUDGET ΔΕΝ ΔΗΛΩΝΕΙ ΕΤΟΣ (περίμενα κάτι σαν 'Budget v1 2026' "
+                  "στις πρώτες γραμμές). Χρήση ημερολογιακού έτους %s — ΕΛΕΓΞΕ ΤΟ."
+                  % fallback)
+        return fallback, False
+    year = max(years, key=lambda y: years[y])
+    if len(years) > 1:
+        log.warning("  Το budget αναφέρει πολλά έτη %s — επιλέχθηκε το %s (συχνότερο)."
+                    % (sorted(years), year))
+    log.info("  Έτος budget από το αρχείο: %s" % year)
+    if abs(int(year) - int(fallback)) > 1:
+        log.error("  ΠΡΟΣΟΧΗ: το budget λέει %s ενώ τρέχουμε στο %s — απόκλιση >1 έτους."
+                  % (year, fallback))
+    return int(year), True
+
+
 def load_budget(budget_xlsx_path):
     """Read Budget v1 from the Management Report 'Result excl. All EORD' sheet."""
     log.info("=" * 60)
@@ -709,6 +748,8 @@ def load_budget(budget_xlsx_path):
 
     log.info(f"  Reading sheet: '{result_sheet_name}'")
     ws = wb[result_sheet_name]
+    global BUDGET_YEAR
+    BUDGET_YEAR, _detected = detect_budget_year(ws, datetime.now().year)
 
     # --- Στήλη ονόματος καταστήματος ---
     # Η παλιά ευρετική μετρούσε τιμές που ξεκινούν με "KFC" - στο Taco Bell
@@ -1031,7 +1072,9 @@ def build_data_json(data, budget, hourly_data=None):
         },
         'budget':       budget_out,
         # Year-keyed budget archive (preserved across years by merge_with_existing)
-        'budget_by_year': { str(datetime.now().year): budget_out },
+        # ΕΤΟΣ ΑΠΟ ΤΟ ΑΡΧΕΙΟ — όχι datetime.now(). Βλ. detect_budget_year().
+        'budget_year': int(BUDGET_YEAR or datetime.now().year),
+        'budget_by_year': { str(BUDGET_YEAR or datetime.now().year): budget_out },
         'records_st':   records_st,
         'records_type': records_type,
         'records_ch':   records_ch,
