@@ -48,6 +48,12 @@ WX_KIND_ORDER = ['snow', 'rain', 'ban', 'wave']
 ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive'
 FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
 PAST_DAYS = 92          # όσο δέχεται το forecast API — καλύπτει το κενό του archive
+
+# ⚠ ΤΑ ΙΔΙΑ ΠΕΔΙΑ ΚΑΙ ΣΤΑ ΔΥΟ ΣΚΕΛΗ (archive + forecast). Όταν το forecast
+# ζητούσε μόνο τη μέγιστη, το store() έγραφε None στα υπόλοιπα και έσβηνε
+# ό,τι είχε φέρει το archive — 79 από 87 πρόσφατες ημέρες χωρίς βροχή.
+DAILY_FIELDS = ('temperature_2m_max,temperature_2m_min,rain_sum,'
+                'snowfall_sum,wind_gusts_10m_max')
 HTTP_TIMEOUT = 90
 
 
@@ -96,7 +102,22 @@ def fetch_tmax(points, start_date, end_date, cache_path, log=None):
     """
     cache = _load_cache(cache_path)
     keys = ['%.4f,%.4f' % p for p in points]
-    missing = [p for p, k in zip(points, keys) if not cache.get(k)]
+
+    def needs_backfill(k):
+        """Λείπει ΤΕΛΕΙΩΣ, ή είναι από παλιότερη έκδοση χωρίς `tmin`;
+
+        ⚠ ΧΩΡΙΣ ΑΥΤΟ ΤΟ ΝΕΟ ΠΕΔΙΟ ΔΕΝ ΕΡΧΕΤΑΙ ΠΟΤΕ ΓΙΑ ΤΟ ΙΣΤΟΡΙΚΟ: το
+        archive καλείται μόνο για σημεία που λείπουν ΟΛΟΚΛΗΡΑ, οπότε μια
+        γεμάτη cache θα έμενε για πάντα χωρίς την ελάχιστη θερμοκρασία.
+        """
+        days = cache.get(k)
+        if not days:
+            return True
+        for v in days.values():                 # αρκεί μία εγγραφή για να κριθεί
+            return 'tmin' not in v
+        return True
+
+    missing = [p for p, k in zip(points, keys) if needs_backfill(k)]
     fresh_from = (datetime.date.fromisoformat(end_date) -
                   datetime.timedelta(days=PAST_DAYS - 2)).isoformat()
 
@@ -114,8 +135,18 @@ def fetch_tmax(points, start_date, end_date, cache_path, log=None):
                 t = g('temperature_2m_max')
                 if t is None:
                     continue
-                slot[ds] = {'tmax': t, 'rain': g('rain_sum'),
-                            'snow': g('snowfall_sum'), 'gust': g('wind_gusts_10m_max', 0)}
+                fresh = {'tmax': t, 'tmin': g('temperature_2m_min'),
+                         'rain': g('rain_sum'), 'snow': g('snowfall_sum'),
+                         'gust': g('wind_gusts_10m_max', 0)}
+                # ⚠ ΣΥΓΧΩΝΕΥΣΗ, ΟΧΙ ΑΝΤΙΚΑΤΑΣΤΑΣΗ. Το σκέλος forecast ζητούσε
+                # ΜΟΝΟ `temperature_2m_max` ενώ το store έγραφε ΟΛΑ τα πεδία:
+                # τα rain/snow/gust γίνονταν None και ΣΒΗΝΑΝ ό,τι είχε φέρει
+                # το archive. ΜΕΤΡΗΜΕΝΟ: 79 από τις τελευταίες 87 ημέρες είχαν
+                # `rain: None`, δηλαδή επί ~3 μήνες ΚΑΜΙΑ ημέρα δεν μπορούσε να
+                # χαρακτηριστεί βροχή ή χιόνι. Πλέον και τα δύο σκέλη ζητούν τα
+                # ΙΔΙΑ πεδία, ΚΑΙ το None δεν σβήνει υπάρχουσα τιμή.
+                old = slot.get(ds) or {}
+                slot[ds] = {**old, **{kk: vv for kk, vv in fresh.items() if vv is not None}}
 
     try:
         if missing:                                     # πλήρες ιστορικό, μία φορά
@@ -125,7 +156,7 @@ def fetch_tmax(points, start_date, end_date, cache_path, log=None):
                 'latitude': ','.join('%.4f' % p[0] for p in missing),
                 'longitude': ','.join('%.4f' % p[1] for p in missing),
                 'start_date': start_date, 'end_date': end_date,
-                'daily': 'temperature_2m_max,rain_sum,snowfall_sum,wind_gusts_10m_max',
+                'daily': DAILY_FIELDS,
                 'timezone': 'Europe%2FAthens',
             })), missing)
         if log:
@@ -134,7 +165,7 @@ def fetch_tmax(points, start_date, end_date, cache_path, log=None):
             'latitude': ','.join('%.4f' % p[0] for p in points),
             'longitude': ','.join('%.4f' % p[1] for p in points),
             'past_days': PAST_DAYS, 'forecast_days': 7,
-            'daily': 'temperature_2m_max', 'timezone': 'Europe%2FAthens',
+            'daily': DAILY_FIELDS, 'timezone': 'Europe%2FAthens',
         })), points)
     except Exception as e:
         if log:
@@ -303,22 +334,26 @@ def build_heat_block(store_order, index_html_path, work_dir, first_date, last_da
     # με ΚΟΙΝΟ ευρετήριο ημερομηνιών (ώστε να μην επαναλαμβάνονται 22 φορές).
     # Μετρημένο κόστος: ~142 KB, δηλαδή 1,0% του data.json.
     dates = sorted({ds for p in pts for ds in (wx.get(p) or {}) if ds >= first_date})
-    daily, daily_rain = {}, {}
+    daily, daily_rain, daily_min = {}, {}, {}
     if dates:
         pos = {ds: i for i, ds in enumerate(dates)}
         for i, p in per_store.items():
             days = wx.get(p) or {}
             arr = [None] * len(dates)
             rn = [None] * len(dates)
+            mn = [None] * len(dates)
             for ds, v in days.items():
                 j = pos.get(ds)
                 if j is not None:
                     arr[j] = v.get('tmax')
                     rn[j] = v.get('rain')
+                    mn[j] = v.get('tmin')
             if any(x is not None for x in arr):
                 daily[str(i)] = arr
             if any(x for x in rn):
                 daily_rain[str(i)] = rn
+            if any(x is not None for x in mn):
+                daily_min[str(i)] = mn
 
     if log:
         log.info('  [heat] %d καταστήματα · ημέρες-καταστήματος: %s'
@@ -340,4 +375,5 @@ def build_heat_block(store_order, index_html_path, work_dir, first_date, last_da
         # ⚠ ΙΔΙΟ ευρετήριο ημερομηνιών με το `daily_tmax.dates` — δεν
         # επαναλαμβάνεται (13 KB). Βροχή σε mm, `null` όπου λείπει μέτρηση.
         'daily_rain': {'by_store': daily_rain},
+        'daily_tmin': {'by_store': daily_min},   # ίδιο ευρετήριο· ελάχιστη °C
     }

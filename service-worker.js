@@ -7,7 +7,7 @@
 //   - Icons & manifest: cache-first
 // =====================================================================
 
-const CACHE_VERSION = 'tacobell-dashboard-v12';  // v12: vroxi se mm sto keli (index.html allakse)
+const CACHE_VERSION = 'tacobell-dashboard-v13';  // v13: elaxisti thermokrasia (index.html allakse)
 const APP_SHELL = [
   './',
   './index.html',

@@ -2342,6 +2342,36 @@ function dayRain(ds, storeFilter) {
 /** Κάτω από αυτό είναι ψιχάλα — θα γέμιζε το πλέγμα νούμερα χωρίς νόημα. */
 const RAIN_SHOW_MM = 1.0;
 
+/**
+ * Ελάχιστη θερμοκρασία — **ΕΛΑΧΙΣΤΟ** των επιλεγμένων, συμμετρικά με το
+ * dayTmax() που δίνει μέγιστο: και τα δύο είναι το ΑΚΡΟ, σε αντίθεση με τη
+ * βροχή που είναι διάμεσος (βλ. dayRain για το γιατί).
+ */
+function dayTmin(ds, storeFilter) {
+  const dt = HEAT && HEAT.daily_tmax, dn = HEAT && HEAT.daily_tmin;
+  if (!dt || !dn || !dn.by_store) return null;
+  let idx = _tmaxCache.get('#idx');
+  if (!idx) { idx = new Map(dt.dates.map((d, i) => [d, i])); _tmaxCache.set('#idx', idx); }
+  const j = idx.get(ds);
+  if (j === undefined) return null;
+  let best = null;
+  for (let si = 0; si < STORES.length; si++) {
+    if (storeFilter && !storeFilter.has(si)) continue;
+    const a = dn.by_store[si];
+    if (a && a[j] != null && (best == null || a[j] < best)) best = a[j];
+  }
+  return best;
+}
+
+/**
+ * Πάνω από αυτό η ελάχιστη δεν λέει τίποτα — μπαίνει ΜΟΝΟ όταν κάνει κρύο.
+ * ΜΕΤΡΗΜΕΝΟ σε 1.321 ημέρες, ποσοστό ημερών κάτω από το κατώφλι:
+ *     0°C 7%  ·  3°C 19%  ·  **8°C 41%**  ·  10°C 50%  ·  12°C 58%
+ * Διάμεσος ελάχιστης ανά μήνα: Ιαν 1° · Απρ 8° · Ιουλ 22° · Οκτ 11° · Δεκ 3°.
+ * Με 8°C πιάνει ουσιαστικά Νοέμβριο-Μάρτιο και σιωπά το καλοκαίρι.
+ */
+const TMIN_SHOW_C = 8;
+
 /** Χρώμα κελιού ανά θερμοκρασία — μπλε στο κρύο, κόκκινο στον καύσωνα. */
 function tmaxColor(t) {
   if (t == null) return 'transparent';
@@ -4813,10 +4843,15 @@ function _calendarHeatmap(R) {
         // για τις ακραίες (by_store). Το tooltip λέει ΚΑΙ ΤΑ ΔΥΟ σε κάθε λειτουργία,
         // ώστε η εναλλαγή χρώματος να μη χάνει ποτέ πληροφορία.
         const wxT = dayTmax(ds, R.storeFilter);
+        const wxN = dayTmin(ds, R.storeFilter);
         const wxR = dayRain(ds, R.storeFilter);
         const wxK = hdCal.get(ds);
         const wxIcon = wxK ? (HEAT_ICON[wxK.kind] || '') : '';
+        // Στο tooltip η ελάχιστη μπαίνει ΠΑΝΤΑ όταν υπάρχει· στο κελί μόνο
+        // όταν κάνει κρύο (βλ. TMIN_SHOW_C) — αλλιώς το καλοκαίρι θα έγραφε
+        // «37/26°» χωρίς κανένα όφελος.
         const wxTip = (wxT != null ? ' · ' + wxT.toFixed(1) + '°C' : '')
+            + (wxN != null ? ' / ελάχ. ' + wxN.toFixed(1) + '°C' : '')
             + (wxR != null && wxR >= 0.1 ? ' · ' + wxR.toFixed(1) + ' mm βροχή' : '')
             + (wxK ? ' ' + (HEAT_ICON[wxK.kind] || '') + ' ' + HEAT_KIND_LABEL[wxK.kind] : '');
         // Τα mm μπαίνουν ΜΟΝΟ πάνω από το κατώφλι: κάτω από 1mm είναι ψιχάλα
@@ -4826,9 +4861,15 @@ function _calendarHeatmap(R) {
               + (wxR >= 10 ? Math.round(wxR) : wxR.toFixed(1)) + 'mm</span>'
             : '';
 
+        // «12/3°» στην ΙΔΙΑ γραμμή, ΟΧΙ τέταρτη σειρά: το κελί είναι ήδη
+        // ημέρα + θερμοκρασία + mm και στο στενότερο πλάτος έχει 6px περιθώριο.
+        const tempTxt = wxT == null ? ''
+            : (wxN != null && wxN <= TMIN_SHOW_C)
+                ? Math.round(wxT) + '/' + Math.round(wxN) + '°'
+                : Math.round(wxT) + '°';
         const sub = wxMode
-            ? ((wxT != null ? '<span style="font-size:7px;color:#fff;text-shadow:0 0 2px rgba(0,0,0,.6)">'
-                 + Math.round(wxT) + '°</span>' : '') + rainLine)
+            ? ((tempTxt ? '<span style="font-size:7px;color:#fff;text-shadow:0 0 2px rgba(0,0,0,.6)">'
+                 + tempTxt + '</span>' : '') + rainLine)
             : (hol ? '<span style="font-size:7px">🎉</span>'
                 : (future
                     ? (proj != null ? '<span style="font-size:7px;color:var(--text-2)">~' + Math.round(proj / 1000) + 'K</span>' : '')
@@ -4869,8 +4910,9 @@ function _calendarHeatmap(R) {
           + (wxMode ? '🌤 Καιρός' : '📊 Απόδοση') + '</button>'
         : '';
     const legend = wxMode
-        ? 'Χρώμα = μέγιστη θερμοκρασία (μπλε κρύο → κόκκινο καύσωνας), ο αριθμός = °C, '
-          + 'από κάτω τα mm βροχής (πάνω από ' + RAIN_SHOW_MM + 'mm). '
+        ? 'Χρώμα = μέγιστη θερμοκρασία (μπλε κρύο → κόκκινο καύσωνας), ο αριθμός = °C '
+          + '(«12/3°» = μέγιστη/ελάχιστη, όταν η ελάχιστη πέφτει κάτω από '
+          + TMIN_SHOW_C + '°C), από κάτω τα mm βροχής (πάνω από ' + RAIN_SHOW_MM + 'mm). '
           + '🌡 καύσωνας · 🌧 έντονη βροχή · ❄ χιόνι. Οι μελλοντικές ημέρες είναι πρόβλεψη (~16 ημέρες). '
           + 'Η θερμοκρασία είναι η ΜΕΓΙΣΤΗ των επιλεγμένων καταστημάτων, η βροχή η ΔΙΑΜΕΣΟΣ '
           + '— το μέγιστο βροχής σημαίνει «έβρεξε κάπου» και ισχύει σχεδόν πάντα.'
