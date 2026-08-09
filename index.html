@@ -4877,6 +4877,25 @@ function _calendarHeatmap(R) {
         const wxR = dayRain(ds, R.storeFilter);
         const wxK = hdCal.get(ds);
         const wxIcon = wxK ? (HEAT_ICON[wxK.kind] || '') : '';
+
+        // ── ΠΕΡΣΙΝΟΣ ΚΑΙΡΟΣ ────────────────────────────────────────────────
+        // Ίδιος λόγος με το γράφημα Trend: η διόρθωση της πρόβλεψης είναι
+        // ΛΟΓΟΣ φέτος/πέρσι, οπότε χωρίς την περσινή ημέρα δεν κρίνεται.
+        // ⚠ ΔΕΝ μπαίνει τέταρτη γραμμή: μετρημένα, το κελί έχει 22px γεμάτα
+        // σε 28px στο στενότερο πλάτος — περιθώριο 6px, μία γραμμή θέλει 7-8.
+        // Άρα ΣΗΜΑ στην ΠΑΝΩ ΑΡΙΣΤΕΡΗ γωνία (η δεξιά είναι του φετινού) και
+        // τα νούμερα στο tooltip.
+        const lds = lyDate(ds, STATE.ly_mode);
+        const lyK = hdCal.get(lds);
+        const lyT = dayTmax(lds, R.storeFilter);
+        const lyR = dayRain(lds, R.storeFilter);
+        const lyTip = (lyT != null || lyK)
+            ? '\nΠΕΡΣΙ ' + lds + (lyT != null ? ' · ' + lyT.toFixed(1) + '°C' : '')
+              + (lyR != null && lyR >= 0.1 ? ' · ' + lyR.toFixed(1) + ' mm' : '')
+              + (lyK ? ' ' + (HEAT_ICON[lyK.kind] || '') + ' ' + HEAT_KIND_LABEL[lyK.kind] : '')
+              + (lyK && wxK ? ' — είχε και πέρσι, η διόρθωση σχεδόν μηδενίζεται'
+                 : (lyK && !wxK ? ' — φέτος όχι, η πρόβλεψη διορθώνεται ΠΡΟΣ ΤΑ ΠΑΝΩ' : ''))
+            : '';
         // Στο tooltip η ελάχιστη μπαίνει ΠΑΝΤΑ όταν υπάρχει· στο κελί μόνο
         // όταν κάνει κρύο (βλ. TMIN_SHOW_C) — αλλιώς το καλοκαίρι θα έγραφε
         // «37/26°» χωρίς κανένα όφελος.
@@ -4920,8 +4939,14 @@ function _calendarHeatmap(R) {
         // περιθώριο 0,2px, που το τρώει η πρώτη διαφορετική γραμματοσειρά.
         // Με line-height:1 πέφτει στα 22px και περισσεύουν 9.
         const lh = wxMode ? 'line-height:1;' : '';
-        cells += '<div title="' + title + wxTip + '" style="position:relative;aspect-ratio:1;border-radius:4px;background:' + bgc + ';' + bd + ';display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-size:9px;' + lh + opc + '">' +
-          badge + '<span style="font-weight:600' + (wxMode && wxT != null ? ';color:#fff;text-shadow:0 0 2px rgba(0,0,0,.6)' : '') + '">' + d + '</span>' + sub + '</div>';
+        // ΔΕΞΙΑ φέτος (πλήρες), ΑΡΙΣΤΕΡΑ πέρσι (θαμπό) — ίδια ιεραρχία με το
+        // γεμάτο/κενό τετράγωνο του γραφήματος Trend.
+        const lyBadge = (lyK && HEAT_ICON[lyK.kind])
+            ? '<span style="position:absolute;top:0;left:1px;font-size:7px;line-height:1;opacity:0.5">'
+              + HEAT_ICON[lyK.kind] + '</span>'
+            : '';
+        cells += '<div title="' + title + wxTip + lyTip + '" style="position:relative;aspect-ratio:1;border-radius:4px;background:' + bgc + ';' + bd + ';display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;font-size:9px;' + lh + opc + '">' +
+          badge + lyBadge + '<span style="font-weight:600' + (wxMode && wxT != null ? ';color:#fff;text-shadow:0 0 2px rgba(0,0,0,.6)' : '') + '">' + d + '</span>' + sub + '</div>';
       }
       grids += '<div style="flex:1;min-width:230px;max-width:320px"><div style="font-size:11px;font-weight:700;margin-bottom:6px;text-align:center">' + MON[mo.m] + ' ' + mo.y + '</div>' +
         '<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px;margin-bottom:3px">' + DOW.map(x => '<div style="text-align:center;font-size:8px;color:var(--text-2)">' + x + '</div>').join('') + '</div>' +
@@ -4943,7 +4968,9 @@ function _calendarHeatmap(R) {
         ? 'Χρώμα = μέγιστη θερμοκρασία (μπλε κρύο → κόκκινο καύσωνας), ο αριθμός = °C '
           + '(«12/3°» = μέγιστη/ελάχιστη, όταν η ελάχιστη πέφτει κάτω από '
           + TMIN_SHOW_C + '°C), από κάτω τα mm βροχής (πάνω από ' + RAIN_SHOW_MM + 'mm). '
-          + '🌡 καύσωνας · 🌧 έντονη βροχή · ❄ χιόνι. Οι μελλοντικές ημέρες είναι πρόβλεψη (~16 ημέρες). '
+          + '🌡 καύσωνας · 🌧 έντονη βροχή · ❄ χιόνι — ΔΕΞΙΑ φέτος, ΑΡΙΣΤΕΡΑ θαμπό ο ΠΕΡΣΙΝΟΣ '
+          + 'καιρός της αντίστοιχης ημέρας (νούμερα στο tooltip). '
+          + 'Οι μελλοντικές ημέρες είναι πρόβλεψη (~16 ημέρες). '
           + 'Η θερμοκρασία είναι η ΜΕΓΙΣΤΗ των επιλεγμένων καταστημάτων, η βροχή η ΔΙΑΜΕΣΟΣ '
           + '— το μέγιστο βροχής σημαίνει «έβρεξε κάπου» και ισχύει σχεδόν πάντα.'
         : 'Ο αριθμός στο κελί = % απόκλιση από το αναμενόμενο. 🎉 = αργία. '
