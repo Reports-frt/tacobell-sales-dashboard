@@ -1048,6 +1048,30 @@ def update_daily_archive(realtime, archive_dir: Path, today_str=None):
     return history
 
 
+def pick_newest(source_dir: Path, patterns, label: str):
+    """
+    Return the NEWEST file (by mtime) matching any of `patterns`, or None.
+
+    Why not glob(...)[0]: _work/ can accumulate files from older naming schemes
+    alongside the name pull_food_emails.py writes every day. glob() gives no
+    order guarantee, so [0] could silently read a stale file (it did in the KFC
+    repo — hourly ALC/Combos showed May data for 2.5 months). Any run with more
+    than one candidate now says so out loud.
+    """
+    seen = {}
+    for pat in patterns:
+        for fp in source_dir.glob(pat):
+            if fp.is_file():
+                seen[fp.resolve()] = fp
+    files = sorted(seen.values(), key=lambda p: (-p.stat().st_mtime, p.name))
+    if len(files) > 1:
+        print(f"    ! {label}: {len(files)} candidates — using the NEWEST:")
+        for i, fp in enumerate(files):
+            stamp = datetime.fromtimestamp(fp.stat().st_mtime).strftime('%Y-%m-%d %H:%M')
+            print(f"      {'→' if i == 0 else ' '} {stamp}  {fp.name}")
+    return files[0] if files else None
+
+
 def build_food_data_json(source_dir: Path, output_dir: Path):
     """Main pipeline: read sources, aggregate, write food_data.json."""
     print("=" * 60)
@@ -1068,45 +1092,43 @@ def build_food_data_json(source_dir: Path, output_dir: Path):
     # Step 3: Optional cross-validation
     print("\nSTEP 3: Load ΚΟΣΤΟΛΟΓΗΣΗ for cross-check (optional)")
     kostologisi = {}
-    kosto_files = list(source_dir.glob('*ΚΟΣΤΟΛΟΓΗΣΗ*.xlsx'))
-    if kosto_files:
-        kostologisi = load_kostologisi(kosto_files[0])
+    kosto_file = pick_newest(source_dir, ['*ΚΟΣΤΟΛΟΓΗΣΗ*.xlsx'], 'ΚΟΣΤΟΛΟΓΗΣΗ')
+    if kosto_file:
+        kostologisi = load_kostologisi(kosto_file)
     else:
         print("    → No ΚΟΣΤΟΛΟΓΗΣΗ file found, skipping")
-    
+
     # Step 3b: Load Μεικτό κέρδος (product profitability)
     print("\nSTEP 3b: Load Μεικτό κέρδος (optional)")
     meikto_data = None
     # Match all variations of Μεικτό κέρδος filename (with space, underscore, accents)
-    meikto_files = (
-        list(source_dir.glob('*Μεικτό_κέρδος*.xlsx'))
-        + list(source_dir.glob('*Μεικτό κέρδος*.xlsx'))
-        + list(source_dir.glob('*Μεικτο_κερδος*.xlsx'))
-        + list(source_dir.glob('*Μεικτο κερδος*.xlsx'))
-    )
-    # Deduplicate (in case multiple patterns match same file)
-    meikto_files = list(set(meikto_files))
-    if meikto_files:
-        meikto_data = load_meikto_kerdos(meikto_files[0])
+    meikto_file = pick_newest(source_dir, [
+        '*Μεικτό_κέρδος*.xlsx',
+        '*Μεικτό κέρδος*.xlsx',
+        '*Μεικτο_κερδος*.xlsx',
+        '*Μεικτο κερδος*.xlsx',
+    ], 'Μεικτό κέρδος')
+    if meikto_file:
+        meikto_data = load_meikto_kerdos(meikto_file)
     else:
         print("    → No Μεικτό κέρδος file found, skipping (Products tab will be empty)")
-    
+
     # Step 3c: Load ALC + Combos hourly
     print("\nSTEP 3c: Load ALC + Combos hourly (optional)")
     alc_data = None
     combos_data = None
-    alc_files = list(source_dir.glob('*ALC*Stores*Hours*.xlsx'))
-    combos_files = list(source_dir.glob('*Combos*Stores*Hours*.xlsx'))
-    if alc_files:
+    alc_file = pick_newest(source_dir, ['*ALC*Stores*Hours*.xlsx'], 'ALC hourly')
+    combos_file = pick_newest(source_dir, ['*Combos*Stores*Hours*.xlsx'], 'Combos hourly')
+    if alc_file:
         try:
-            alc_data = load_alc_combos(alc_files[0], 'alc')
+            alc_data = load_alc_combos(alc_file, 'alc')
         except Exception as e:
             print(f"    → ALC load failed: {e}")
     else:
         print("    → No ALC file found, skipping")
-    if combos_files:
+    if combos_file:
         try:
-            combos_data = load_alc_combos(combos_files[0], 'combos')
+            combos_data = load_alc_combos(combos_file, 'combos')
         except Exception as e:
             print(f"    → Combos load failed: {e}")
     else:
@@ -1154,12 +1176,14 @@ def build_food_data_json(source_dir: Path, output_dir: Path):
     output = {
         'meta': {
             'generated_at': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+            # Exactly what this run read — same Path objects the loaders got,
+            # so meta can never claim a different file than the one parsed.
             'source_files': [f for f in [
                 'FoodCost.xlsx', 'CategoriesFC.xlsx',
-                next((f.name for f in kosto_files), None),
-                next((f.name for f in meikto_files), None) if meikto_files else None,
-                next((f.name for f in alc_files), None) if alc_files else None,
-                next((f.name for f in combos_files), None) if combos_files else None,
+                kosto_file.name if kosto_file else None,
+                meikto_file.name if meikto_file else None,
+                alc_file.name if alc_file else None,
+                combos_file.name if combos_file else None,
             ] if f],
             'kfc_stores': [STORE_NAME_MAP[s] for s in KFC_STORES],
             'periods': period_strings,

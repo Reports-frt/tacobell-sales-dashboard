@@ -57,6 +57,9 @@ if %BUILD_RESULT% NEQ 0 (
 )
 
 echo ============================================
+REM Deploy to Cloudflare Pages (parallel hosting) - non-fatal if it fails
+python "%~dp0..\deploy_cf_pages.py"
+
 echo DAILY UPDATE COMPLETE
 echo ============================================
 echo.

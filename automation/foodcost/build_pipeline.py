@@ -31,6 +31,12 @@ REPO_ROOT = Path(r"C:\Users\IT\Documents\GitHub\tacobell-sales-dashboard")
 WORK_DIR = REPO_ROOT / "_work"
 OUTPUT_DIR = REPO_ROOT / "food"   # /food/ subfolder at repo root (GitHub Pages serves from root)
 
+# Git auth: the PAT lives ONLY in this gitignored file — never in .git/config's
+# remote URL. git_push() injects it into a one-off push URL at runtime, so the
+# token is not persisted anywhere git tracks and never printed unmasked.
+PAT_FILE = WORK_DIR / ".github_pat"
+GITHUB_REPO = "Reports-frt/tacobell-sales-dashboard"
+
 REQUIRED_FILES = [
     "FoodCost.xlsx",
     "CategoriesFC.xlsx",
@@ -136,19 +142,30 @@ def git_push(repo_root):
         log(f"git commit failed: {out}", "ERROR")
         return False
     log(f"  Committed: {msg}")
-    
+
+    # Build a one-off push URL with the PAT — keeps the token out of .git/config.
+    if not PAT_FILE.exists():
+        log(f"PAT file not found: {PAT_FILE}", "ERROR")
+        log("Create it with the GitHub token as its only content.", "ERROR")
+        return False
+    pat = PAT_FILE.read_text(encoding='utf-8').strip()
+    push_url = f"https://x-access-token:{pat}@github.com/{GITHUB_REPO}.git"
+
+    def mask(s):
+        return (s or "").replace(pat, "***TOKEN***")
+
     # Push with retry
     for attempt in range(1, GIT_PUSH_RETRIES + 1):
         log(f"  Push attempt {attempt}/{GIT_PUSH_RETRIES}...")
-        rc, out = run_git(['push'], cwd=repo_root)
+        rc, out = run_git(['push', push_url, 'HEAD:main'], cwd=repo_root)
         if rc == 0:
             log("  ✓ Push successful")
             return True
-        log(f"  Push failed: {out}", "WARN")
+        log(f"  Push failed: {mask(out)}", "WARN")
         if attempt < GIT_PUSH_RETRIES:
             log(f"  Retrying in {GIT_PUSH_DELAY_SEC}s...")
             time.sleep(GIT_PUSH_DELAY_SEC)
-    
+
     log(f"All push attempts failed", "ERROR")
     return False
 

@@ -29,3 +29,10 @@ desktop.ini
 .env.*
 credentials.json
 github_pat.txt
+
+# Cache καιρού — ξαναπαράγεται με το fetch_weather.py του kfc repo (--chain tacobell)
+automation/context/weather_daily.json
+
+# Cache/credentials του wrangler - ΠΟΤΕ σε commit
+.wrangler/
+**/.wrangler/

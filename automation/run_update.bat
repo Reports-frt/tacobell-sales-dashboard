@@ -10,4 +10,10 @@ cd /d "C:\Users\IT\Documents\GitHub\tacobell-sales-dashboard"
 REM Use pythonw.exe to suppress console window
 pythonw.exe "C:\Users\IT\Documents\GitHub\tacobell-sales-dashboard\automation\update_dashboard.py"
 
-exit /b %ERRORLEVEL%
+set UPDATE_RESULT=%ERRORLEVEL%
+
+REM Deploy to Cloudflare Pages (parallel hosting) - non-fatal if it fails
+pythonw.exe "%~dp0deploy_cf_pages.py"
+
+REM Report the UPDATE result to Task Scheduler, not the deploy result
+exit /b %UPDATE_RESULT%
