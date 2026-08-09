@@ -4661,20 +4661,48 @@ function renderTrend(R) {
       }
     });
     // ===== Ημέρες καύσωνα — ίδιο μοτίβο με τις αργίες, δική τους σειρά =====
+    //
+    // ⚠ ΦΕΤΟΣ ΠΑΝΩ, ΠΕΡΣΙ ΚΑΤΩ — ακριβώς όπως οι αργίες λίγο παραπάνω. Ο
+    // περσινός καιρός ΕΛΕΙΠΕ ενώ η περσινή αργία σημαινόταν: ασυμμετρία που
+    // έκρυβε το πιο χρήσιμο νούμερο. Η διόρθωση της πρόβλεψης είναι ΛΟΓΟΣ
+    // φέτος/πέρσι — αν η περσινή αντίστοιχη ημέρα είχε ΚΙ ΑΥΤΗ καύσωνα, η
+    // πτώση είναι ήδη μέσα στη βάση και η διόρθωση σχεδόν μηδενίζεται. Χωρίς
+    // την περσινή σήμανση, μια «επίπεδη» πρόβλεψη σε καύσωνα έμοιαζε λάθος.
     if (HEAT) {
       const hd = heatDays(R && R.storeFilter);
+      const effTail = (kind) => {
+        const eff = HEAT.effects && HEAT.effects[kind];
+        return eff ? `\nΙστορικά: πωλήσεις ${(eff.s*100).toFixed(1)}% · συναλλαγές ${(eff.t*100).toFixed(1)}% (n=${eff.n})` : '';
+      };
       data.forEach((p, i) => {
         if (!p.date) return;
+        const x = xScale(i);
         const info = hd.get(p.date);
-        if (!info) return;
-        const x = xScale(i), c = HEAT_COLOR[info.kind];
-        const t = heatMeasure(info);
-        const scope = info.of > 1 ? ` (${info.n}/${info.of} καταστήματα)` : '';
-        const eff = HEAT.effects && HEAT.effects[info.kind];
-        const tail = eff ? `\nΙστορικά: πωλήσεις ${(eff.s*100).toFixed(1)}% · συναλλαγές ${(eff.t*100).toFixed(1)}% (n=${eff.n})` : '';
-        svg += `<line x1="${x}" y1="${PAD.t}" x2="${x}" y2="${H-PAD.b}" stroke="${c}" stroke-width="1" stroke-dasharray="1 4" opacity="0.45"/>`;
-        svg += `<g><rect x="${x-4}" y="${PAD.t+14}" width="8" height="8" rx="2" fill="${c}"/>` +
-               `<title>${p.date}: ${HEAT_KIND_LABEL[info.kind]}${t}${scope}${tail}</title></g>`;
+        const lds = lyDate(p.date, STATE.ly_mode);
+        const linfo = hd.get(lds);
+
+        if (info) {
+          const c = HEAT_COLOR[info.kind];
+          const scope = info.of > 1 ? ` (${info.n}/${info.of} καταστήματα)` : '';
+          // Όταν ΚΑΙ ΤΑ ΔΥΟ έτη είναι ακραία, το λέμε ρητά: εξηγεί γιατί η
+          // πρόβλεψη δεν «πέφτει» όσο θα περίμενε κανείς.
+          const both = linfo
+            ? `\nΠέρσι (${lds}): ${HEAT_KIND_LABEL[linfo.kind]}${heatMeasure(linfo)} — η πτώση είναι ήδη στη βάση, η διόρθωση σχεδόν μηδενίζεται`
+            : `\nΠέρσι (${lds}): χωρίς ακραίο καιρό`;
+          svg += `<line x1="${x}" y1="${PAD.t}" x2="${x}" y2="${H-PAD.b}" stroke="${c}" stroke-width="1" stroke-dasharray="1 4" opacity="0.45"/>`;
+          svg += `<g><rect x="${x-4}" y="${PAD.t+14}" width="8" height="8" rx="2" fill="${c}"/>` +
+                 `<title>${p.date}: ${HEAT_KIND_LABEL[info.kind]}${heatMeasure(info)}${scope}${both}${effTail(info.kind)}</title></g>`;
+        }
+
+        if (linfo) {
+          // Κενό τετράγωνο = ΠΕΡΣΙ, γεμάτο = ΦΕΤΟΣ. Χωρίς κάθετη γραμμή: το
+          // γράφημα έχει ήδη μία ανά φετινή ακραία ημέρα και θα γέμιζε.
+          const lc = HEAT_COLOR[linfo.kind];
+          const lscope = linfo.of > 1 ? ` (${linfo.n}/${linfo.of} καταστήματα)` : '';
+          const note = info ? '' : '\nΦέτος: χωρίς ακραίο καιρό — η πρόβλεψη διορθώνεται ΠΡΟΣ ΤΑ ΠΑΝΩ';
+          svg += `<g><rect x="${x-4}" y="${H-PAD.b-22}" width="8" height="8" rx="2" fill="none" stroke="${lc}" stroke-width="1.5"/>` +
+                 `<title>ΠΕΡΣΙ ${lds}: ${HEAT_KIND_LABEL[linfo.kind]}${heatMeasure(linfo)}${lscope}${note}${effTail(linfo.kind)}</title></g>`;
+        }
       });
     }
     }  // τέλος if (STATE.trendEvents)
@@ -4741,6 +4769,8 @@ function renderTrend(R) {
       <span style="flex:1"></span>
       <button class="trend-metric-chip ${evOn ? 'active' : ''}" onclick="window.toggleTrendEvents()"
         title="Αργίες, ακραίος καιρός και (μελλοντικά) ενέργειες marketing πάνω στην καμπύλη.
+ΠΑΝΩ = φέτος · ΚΑΤΩ = πέρσι. Γεμάτο τετράγωνο = φετινός καιρός, κενό = περσινός.
+Πέρνα τον δείκτη πάνω τους: όταν είχε καύσωνα ΚΑΙ πέρσι, η διόρθωση της πρόβλεψης μηδενίζεται.
 Κλείσ' το για να δεις το καθαρό trend.">${evOn ? '👁' : '🚫'} Γεγονότα${evCount ? ' (' + evCount + ')' : ''}</button>
     </div>
     <div class="panel-section">
