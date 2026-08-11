@@ -3138,7 +3138,14 @@ const STATE = {
   // του έτους — ο διακόπτης επιτρέπει να δεις την καθαρή καμπύλη.
   trendEvents: true,
   // Ημερολόγιο: χρωματισμός με απόδοση (false) ή θερμοκρασία (true).
-  calWeather: false,
+  // ⚠ ΑΝΑΜΜΕΝΟ ΑΠΟ ΠΡΟΕΠΙΛΟΓΗ (11/08/2026, απόφαση χρήστη). Ήταν `false` και
+  // στις δύο αλυσίδες, οπότε οι θερμοκρασίες ανά ημέρα ήταν αόρατες μέχρι να
+  // βρει κανείς το chip «🌤 Καιρός». Ο χρήστης το είχε ανάψει στο KFC και όχι
+  // στα Taco Bell, και το διάβασε ως «λείπει λειτουργία από τα Taco» — ενώ ο
+  // κώδικας ήταν ταυτόσημος. Αόρατη ρύθμιση = ανύπαρκτη λειτουργία.
+  // ⚠ Το localStorage ΥΠΕΡΙΣΧΥΕΙ: όποιος το έχει ήδη αλλάξει κρατά την επιλογή
+  // του (δες `cal_weather` πιο κάτω). Η προεπιλογή αφορά μόνο νέους browser.
+  calWeather: true,
   fcMonth: null,          // Forecast tab: selected month for per-store table (null = next month auto)
   fcMetric: "sales",      // Forecast tab: sales | tcs
   hourlyMetric: "sales",  // Hourly tab: sales | tcs (tcs μόνο όταν HAS_HOURLY_TCS)
