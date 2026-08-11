@@ -11,10 +11,12 @@ Auth: wrangler's machine-wide OAuth (no PAT, no secrets in this repo).
 Logs: _work/cf_deploy.log
 """
 import logging
+import re
 import shutil
 import subprocess
 import sys
 import tempfile
+from datetime import datetime
 from pathlib import Path
 
 REPO = Path(r"C:\Users\IT\Documents\GitHub\tacobell-sales-dashboard")
@@ -100,6 +102,17 @@ def main():
         sw = tmp / "service-worker.js"
         s = sw.read_text(encoding="utf-8")
         s = replace_once(s, SW_OLD_VERSION, SW_NEW_VERSION, "sw-version")
+        # ⚠ ΤΟ CACHE_VERSION ΗΤΑΝ ΠΑΓΩΜΕΝΟ ΣΤΟ v17 ΣΕ ΚΑΘΕ DEPLOY (11/08/2026).
+        # Δες το ΙΔΙΟ σχολιο στο kfc-sales-dashboard — ταυτοσημη διορθωση.
+        # Cache-first app shell + σταθερη εκδοση = ο χρηστης επαιρνε ΠΑΝΤΑ την
+        # προηγουμενη εκδοση του index.html. Το data.json ηταν σωστο
+        # (network-first), γι' αυτο «τα δεδομενα υπαρχουν αλλα δεν φαινονται».
+        stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        s, n = re.subn(r"(const CACHE_VERSION = '[^']*?)(';)",
+                       lambda m: "%s-%s%s" % (m.group(1), stamp, m.group(2)), s, count=1)
+        if n != 1:
+            raise RuntimeError("δεν βρεθηκε το CACHE_VERSION για αποτυπωμα deploy")
+        log.info("  service worker cache: ...-%s", stamp)
         s = insert_after(s, SW_SHELL_ANCHOR, "\n  './agent-chat.js',", "sw-shell")
         sw.write_text(s, encoding="utf-8")
 
