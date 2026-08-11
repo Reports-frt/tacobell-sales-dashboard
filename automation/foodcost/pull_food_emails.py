@@ -15,6 +15,7 @@ Usage:
 import argparse
 import logging
 import sys
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
@@ -69,18 +70,43 @@ logging.basicConfig(
 # =====================================================================
 # OUTLOOK
 # =====================================================================
+# ⚠ ΤΟ Dispatch ΞΕΚΙΝΑΕΙ ΤΟ OUTLOOK ΑΝ ΕΙΝΑΙ ΚΛΕΙΣΤΟ — ΚΑΙ ΑΥΤΟ ΕΙΝΑΙ Η ΠΑΓΙΔΑ.
+#
+# Επειδή δεν σκάει ποτέ, μοιάζει σαν να μη χρειάζεται τίποτα άλλο. Στην
+# πραγματικότητα διαβάζει την ΤΟΠΙΚΗ CACHE πριν προλάβει να συγχρονιστεί,
+# οπότε βρίσκει τα ΧΘΕΣΙΝΑ email — ή κανένα, και στέλνει ψεύτικο «λείπει».
+#
+# ΤΟ ΙΔΙΟ ΣΦΑΛΜΑ ΕΙΧΕ ΗΔΗ ΧΤΥΠΗΣΕΙ ΣΤΙΣ ΠΩΛΗΣΕΙΣ (08/08/2026): τέσσερα
+# συνεχόμενα τρεξίματα του update_dashboard.py βρήκαν το email της προηγούμενης
+# ημέρας και έγραψαν ΧΘΕΣΙΝΗ ημερομηνία, με exit 0 και «DONE» παντού. Εκεί
+# μπήκε ρητό send/receive + αναμονή για ΣΗΜΕΡΙΝΟ email· εδώ ΔΕΝ είχε μπει ποτέ.
+# Ίδιο σχήμα, ίδιες σταθερές — να μην αποκλίνουν τα δύο μονοπάτια.
+FRESH_RETRIES = 6        # ~2 λεπτά συνολικά — όσο θέλει ένα cold sync
+FRESH_WAIT_SEC = 20
+
+
 def connect_to_outlook():
-    """Open Outlook MAPI connection. Returns (Application, Inbox)."""
+    """Open Outlook MAPI connection. Returns (Application, Inbox, Namespace)."""
     try:
         import win32com.client
     except ImportError:
         log.error("pywin32 not installed. Run: pip install pywin32")
         sys.exit(1)
-    
+
     outlook_app = win32com.client.Dispatch("Outlook.Application")
     namespace = outlook_app.GetNamespace("MAPI")
     inbox = namespace.GetDefaultFolder(6)  # 6 = Inbox
-    return outlook_app, inbox
+    return outlook_app, inbox, namespace
+
+
+def force_outlook_sync(ns):
+    """Ζητά ρητά send/receive. Χωρίς αυτό περιμένουμε τον χρονιστή του Outlook."""
+    try:
+        ns.SendAndReceive(False)
+        return True
+    except Exception as e:
+        log.warning(f"  Δεν έγινε εξαναγκασμένος συγχρονισμός Outlook: {e}")
+        return False
 
 
 def find_and_save_email(inbox, config, work_dir, cutoff):
@@ -236,24 +262,43 @@ def main():
     print("=" * 60)
     
     log.info("STEP 1: Connecting to Outlook...")
-    outlook_app, inbox = connect_to_outlook()
+    outlook_app, inbox, namespace = connect_to_outlook()
     log.info(f"  ✓ Connected to inbox")
-    
+    # Ρητό send/receive ΠΡΙΝ την πρώτη σάρωση: αν το Outlook μόλις ξεκίνησε από
+    # το Dispatch, η cache του είναι της προηγούμενης φοράς που έτρεξε.
+    force_outlook_sync(namespace)
+
     log.info(f"\nSTEP 2: Pulling {len(EMAILS_TO_PULL)} emails...")
-    saved = []
-    missing = []
-    
-    for idx, config in enumerate(EMAILS_TO_PULL, 1):
-        log.info(f"\n[{idx}/{len(EMAILS_TO_PULL)}] {config['name']}:")
-        result = find_and_save_email(inbox, config, work_dir, cutoff)
-        
-        if result['status'] == 'ok':
-            saved.append(result)
-        else:
-            log.warning(f"  ✗ {result['message']}")
-            if config.get("required"):
-                missing.append(result)
-    
+
+    def pull_all():
+        ok, miss = [], []
+        for idx, config in enumerate(EMAILS_TO_PULL, 1):
+            log.info(f"\n[{idx}/{len(EMAILS_TO_PULL)}] {config['name']}:")
+            result = find_and_save_email(inbox, config, work_dir, cutoff)
+            if result['status'] == 'ok':
+                ok.append(result)
+            else:
+                log.warning(f"  ✗ {result['message']}")
+                if config.get("required"):
+                    miss.append(result)
+        return ok, miss
+
+    saved, missing = pull_all()
+
+    # ⚠ ΞΑΝΑΠΡΟΣΠΑΘΕΙ ΜΟΝΟ ΣΕ strict. Στο --lenient δεχόμαστε και παλιά email,
+    # άρα «λείπει» σημαίνει ότι όντως δεν ήρθε ποτέ — η αναμονή δεν βοηθά και
+    # θα κρατούσε την εργασία δύο λεπτά χωρίς λόγο.
+    attempt = 0
+    while missing and not args.lenient and attempt < FRESH_RETRIES:
+        attempt += 1
+        log.warning(f"\n  Λείπουν {len(missing)} υποχρεωτικά email — συγχρονισμός "
+                    f"και νέα προσπάθεια σε {FRESH_WAIT_SEC}s ({attempt}/{FRESH_RETRIES})")
+        force_outlook_sync(namespace)
+        time.sleep(FRESH_WAIT_SEC)
+        saved, missing = pull_all()
+    if attempt and not missing:
+        log.info(f"  ✓ Βρέθηκαν μετά από {attempt} προσπάθειες συγχρονισμού")
+
     print()
     print("=" * 60)
     
