@@ -31,6 +31,8 @@
 import json
 import os
 import re
+import time
+import urllib.error
 import urllib.request
 import datetime
 
@@ -81,10 +83,39 @@ def _load_cache(path):
         return {}
 
 
-def _fetch(url, params):
+# ⚠ ΤΟ 503 ΔΕΝ ΕΙΝΑΙ ΘΕΩΡΗΤΙΚΟ — 3 ΣΤΙΣ 10 ΒΡΑΔΙΝΕΣ ΕΚΤΕΛΕΣΕΙΣ (11/08/2026).
+# Μετρημένο στα logs ΚΑΙ ΤΩΝ ΔΥΟ αλυσίδων: 08/08, 09/08, 10/08 στις 21:00:03,
+# ταυτόχρονα σε KFC και Taco Bell. Το ίδιο αίτημα με το χέρι λίγες ώρες μετά
+# περνά κανονικά — δηλαδή είναι ΔΙΑΛΕΙΠΟΝ, όχι λάθος αίτημα.
+#
+# Γιατί μετράει: η βραδινή εργασία υπάρχει ΜΟΝΟ για να ξαναφέρει τη ΣΗΜΕΡΙΝΗ
+# θερμοκρασία αφού κορυφωθεί η μέρα. Όταν το forecast σκέλος πέφτει, η εργασία
+# τερματίζει με exit 0 και «καμία αλλαγή» — δηλαδή αποτυγχάνει στη ΜΟΝΗ της
+# δουλειά, σιωπηλά. Τρία βράδια στη σειρά, χωρίς να το πάρει κανείς είδηση.
+RETRY_DELAYS = (3, 12, 40)      # δευτερόλεπτα· συνολικά < 1 λεπτό
+
+
+def _fetch(url, params, log=None):
     q = '&'.join('%s=%s' % (k, v) for k, v in params.items())
-    with urllib.request.urlopen(url + '?' + q, timeout=HTTP_TIMEOUT) as r:
-        return json.loads(r.read().decode('utf-8'))
+    last = None
+    for attempt in range(len(RETRY_DELAYS) + 1):
+        try:
+            with urllib.request.urlopen(url + '?' + q, timeout=HTTP_TIMEOUT) as r:
+                return json.loads(r.read().decode('utf-8'))
+        except urllib.error.HTTPError as e:
+            # 4xx (εκτός 429) = λάθος αίτημα — η επανάληψη δεν το φτιάχνει.
+            if e.code != 429 and e.code < 500:
+                raise
+            last = e
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            last = e
+        if attempt < len(RETRY_DELAYS):
+            d = RETRY_DELAYS[attempt]
+            if log:
+                log.warning('  [heat] %s — νέα προσπάθεια σε %ds (%d/%d)'
+                            % (last, d, attempt + 1, len(RETRY_DELAYS)))
+            time.sleep(d)
+    raise last
 
 
 def _as_list(payload):
@@ -158,7 +189,7 @@ def fetch_tmax(points, start_date, end_date, cache_path, log=None):
                 'start_date': start_date, 'end_date': end_date,
                 'daily': DAILY_FIELDS,
                 'timezone': 'Europe%2FAthens',
-            })), missing)
+            }, log)), missing)
         if log:
             log.info('  [heat] forecast past_days=%d για %d τοποθεσίες' % (PAST_DAYS, len(points)))
         store(_as_list(_fetch(FORECAST_URL, {                # πρόσφατες + πρόβλεψη
@@ -166,7 +197,7 @@ def fetch_tmax(points, start_date, end_date, cache_path, log=None):
             'longitude': ','.join('%.4f' % p[1] for p in points),
             'past_days': PAST_DAYS, 'forecast_days': 7,
             'daily': DAILY_FIELDS, 'timezone': 'Europe%2FAthens',
-        })), points)
+        }, log)), points)
     except Exception as e:
         if log:
             log.error('  [heat] ΑΠΟΤΥΧΙΑ ΚΑΙΡΟΥ: %s — το dashboard βγαίνει ΧΩΡΙΣ σήμανση '
