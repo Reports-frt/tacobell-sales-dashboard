@@ -47,6 +47,11 @@ WX_THRESHOLDS = {'rain_mm': 12.0, 'snow_cm': 1.0, 'gust_kmh': 70.0}
 # γιατί το χιόνι είναι το σπανιότερο και το ισχυρότερο.
 WX_KIND_ORDER = ['snow', 'rain', 'ban', 'wave']
 
+# Πόσο πίσω πάει η σύγκριση «πέρσι». Το dashboard έχει ΔΥΟ τρόπους: μετατόπιση
+# 364 ημερών (ίδια ημέρα εβδομάδας) και ημερολογιακή ημέρα (365/366 σε δίσεκτο).
+# Παίρνουμε το ΜΕΓΑΛΥΤΕΡΟ ώστε να καλύπτονται και οι δύο.
+LY_SHIFT_DAYS = 366
+
 ARCHIVE_URL = 'https://archive-api.open-meteo.com/v1/archive'
 FORECAST_URL = 'https://api.open-meteo.com/v1/forecast'
 PAST_DAYS = 92          # όσο δέχεται το forecast API — καλύπτει το κενό του archive
@@ -144,11 +149,22 @@ def fetch_tmax(points, start_date, end_date, cache_path, log=None):
         days = cache.get(k)
         if not days:
             return True
+        # ⚠ ΚΑΙ ΤΟ ΕΥΡΟΣ, ΟΧΙ ΜΟΝΟ Η ΥΠΑΡΞΗ (11/08/2026). Ο έλεγχος κοίταζε
+        # μόνο αν λείπει ΟΛΟΚΛΗΡΗ η τοποθεσία ή το `tmin`. Οπότε, όταν το
+        # παράθυρο άνοιξε ένα έτος πίσω για τις σημάνσεις «ΠΕΡΣΙ», η γεμάτη
+        # cache έκρινε «δεν λείπει τίποτα» και ΔΕΝ ζητήθηκε ποτέ η παλιά
+        # χρονιά. Μετρημένο στα Taco Bell: το παράθυρο πήγε στο 2024-08-24 και
+        # οι ημέρες έμειναν 351 — δηλαδή η αλλαγή δεν έκανε ΤΙΠΟΤΑ.
+        if min(days) > start_date:
+            return True
         for v in days.values():                 # αρκεί μία εγγραφή για να κριθεί
             return 'tmin' not in v
         return True
 
     missing = [p for p, k in zip(points, keys) if needs_backfill(k)]
+    if log and missing:
+        log.info('  [heat] backfill: %d/%d τοποθεσίες (λείπουν ή δεν φτάνουν ως %s)'
+                 % (len(missing), len(points), start_date))
     fresh_from = (datetime.date.fromisoformat(end_date) -
                   datetime.timedelta(days=PAST_DAYS - 2)).isoformat()
 
@@ -332,7 +348,24 @@ def build_heat_block(store_order, index_html_path, work_dir, first_date, last_da
             pts.append(g)
     if not pts:
         return None
-    wx, _ = fetch_tmax(pts, first_date, last_date,
+    # ⚠ Ο ΚΑΙΡΟΣ ΞΕΚΙΝΑ ΕΝΑ ΕΤΟΣ ΠΡΙΝ ΤΙΣ ΠΩΛΗΣΕΙΣ — ΟΧΙ ΜΑΖΙ ΤΟΥΣ (11/08/2026).
+    #
+    # Το Trend σημαίνει ΚΑΙ την περσινή αντίστοιχη ημέρα (`lyDate`, μετατόπιση
+    # 364 ημερών). Με αρχή τον καιρού = πρώτη ημέρα ΠΩΛΗΣΕΩΝ, οι περσινές ημέρες
+    # του πρώτου έτους δεν έχουν καιρό και οι σημάνσεις «ΠΕΡΣΙ» λείπουν ΣΙΩΠΗΛΑ.
+    #
+    # ΜΕΤΡΗΜΕΝΟ, Αύγουστος 2026, ίδιο διάστημα:
+    #     KFC  16 σημάνσεις (2 αργίες + 7 φέτος + 7 ΠΕΡΣΙ)
+    #     Taco  2 σημάνσεις (2 αργίες + 0 + 0)
+    # Το KFC δεν το έδειχνε γιατί ξεκινά 01/2023 και καλύπτει το «πέρσι» από
+    # μόνο του. Τα Taco ξεκινούν 09/2025, οπότε ΟΛΟΣ ο Αύγουστος 2025 έλειπε.
+    # Η ασυμμετρία δεν ήταν στον κώδικα — ήταν στο ΕΥΡΟΣ των δεδομένων.
+    wx_from = (datetime.date.fromisoformat(first_date)
+               - datetime.timedelta(days=LY_SHIFT_DAYS + 7)).isoformat()
+    if log:
+        log.info('  [heat] παράθυρο καιρού: %s -> %s (πωλήσεις από %s· ένα έτος '
+                 'πίσω για τις σημάνσεις ΠΕΡΣΙ)' % (wx_from, last_date, first_date))
+    wx, _ = fetch_tmax(pts, wx_from, last_date,
                        os.path.join(work_dir, 'weather_cache.json'), log)
     by_point = {p: classify_wx(wx.get(p, {})) for p in pts}
 
@@ -343,7 +376,8 @@ def build_heat_block(store_order, index_html_path, work_dir, first_date, last_da
             continue
         rows = {}
         for ds, k in sorted(days.items()):
-            if ds < first_date:
+            # ΟΧΙ `first_date`: το Trend ζητά και την περσινή αντίστοιχη ημέρα.
+            if ds < wx_from:
                 continue
             w = wx[p].get(ds) or {}
             rows[ds] = [k, w.get('tmax'), w.get('rain'), w.get('snow')]
@@ -364,7 +398,7 @@ def build_heat_block(store_order, index_html_path, work_dir, first_date, last_da
     # 91% των κελιών θα ήταν κενά. Εδώ βγαίνει συμπαγής σειρά ανά κατάστημα
     # με ΚΟΙΝΟ ευρετήριο ημερομηνιών (ώστε να μην επαναλαμβάνονται 22 φορές).
     # Μετρημένο κόστος: ~142 KB, δηλαδή 1,0% του data.json.
-    dates = sorted({ds for p in pts for ds in (wx.get(p) or {}) if ds >= first_date})
+    dates = sorted({ds for p in pts for ds in (wx.get(p) or {}) if ds >= wx_from})
     daily, daily_rain, daily_min = {}, {}, {}
     if dates:
         pos = {ds: i for i, ds in enumerate(dates)}
