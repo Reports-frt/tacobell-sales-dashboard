@@ -143,31 +143,30 @@ def git_push(repo_root):
         return False
     log(f"  Committed: {msg}")
 
-    # Build a one-off push URL with the PAT — keeps the token out of .git/config.
-    if not PAT_FILE.exists():
-        log(f"PAT file not found: {PAT_FILE}", "ERROR")
-        log("Create it with the GitHub token as its only content.", "ERROR")
-        return False
-    pat = PAT_FILE.read_text(encoding='utf-8').strip()
-    push_url = f"https://x-access-token:{pat}@github.com/{GITHUB_REPO}.git"
+    # ⚠ ΟΙ ΠΡΟΟΡΙΣΜΟΙ ΒΓΗΚΑΝ ΣΕ ΚΟΙΝΟ ΣΗΜΕΙΟ (13/08/2026): automation/
+    # git_targets.py. Το push γινοταν απο ΤΡΙΑ scripts ανα repo, καθενα με
+    # δικο του PAT/retry — με την ημερομηνια ληξης του GitHub (24/08/2026)
+    # γραμμενη τρεις φορες η αποκλιση ηταν θεμα χρονου.
+    # Καθρεφτης παντα, GitHub μεχρι τη ληξη.
+    import importlib.util
+    gt_path = Path(__file__).resolve().parent.parent / "git_targets.py"
+    spec = importlib.util.spec_from_file_location("git_targets", gt_path)
+    git_targets = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(git_targets)
 
-    def mask(s):
-        return (s or "").replace(pat, "***TOKEN***")
+    class _Log:
+        """Γεφυρα προς το log() αυτου του pipeline (δεχεται %-formatting)."""
+        def info(self, m, *a):
+            log(m % a if a else m)
 
-    # Push with retry
-    for attempt in range(1, GIT_PUSH_RETRIES + 1):
-        log(f"  Push attempt {attempt}/{GIT_PUSH_RETRIES}...")
-        rc, out = run_git(['push', push_url, 'HEAD:main'], cwd=repo_root)
-        if rc == 0:
-            log("  ✓ Push successful")
-            return True
-        log(f"  Push failed: {mask(out)}", "WARN")
-        if attempt < GIT_PUSH_RETRIES:
-            log(f"  Retrying in {GIT_PUSH_DELAY_SEC}s...")
-            time.sleep(GIT_PUSH_DELAY_SEC)
+        def warning(self, m, *a):
+            log(m % a if a else m, "WARN")
 
-    log(f"All push attempts failed", "ERROR")
-    return False
+        def error(self, m, *a):
+            log(m % a if a else m, "ERROR")
+
+    res = git_targets.push_all(str(repo_root), _Log())
+    return bool(res.get('mirror') or res.get('github'))
 
 
 # =====================================================================

@@ -113,9 +113,14 @@ CONFIG = {
     # Retry / verification settings
     "push_max_retries":      3,        # if push fails, retry this many times
     "push_retry_delay":      120,      # seconds between push retries
-    "verify_max_attempts":   12,       # max polls of GitHub Pages CDN to confirm deploy
-    "verify_poll_interval":  60,       # seconds between verify polls (12 × 60s = 12 minutes max wait)
-    "pages_url":             "https://reports-frt.github.io/tacobell-sales-dashboard/data.json",
+    # ⚠ Η ΕΠΑΛΗΘΕΥΣΗ ΔΕΙΧΝΕΙ ΠΛΕΟΝ ΣΤΟ CLOUDFLARE (13/08/2026). Ρωτούσε το
+    # GitHub Pages, που σβήνει στις 24/08 — μετά θα περίμενε 12 λεπτά κάτι που
+    # δεν θα ερχόταν ποτέ, και θα κατέγραφε αποτυχία σε πετυχημένο deploy.
+    # Το Cloudflare διαδίδεται σε δευτερόλεπτα (μετρημένο ~20"), οπότε 6×20"
+    # αρκούν αντί για 12×60". Από αυτό το URL διαβάζει ΚΑΙ το labour tool.
+    "verify_max_attempts":   6,
+    "verify_poll_interval":  20,
+    "pages_url":             "https://tacobell-dashboard.pages.dev/data.json",
 }
 
 # ============================================================
@@ -1300,17 +1305,12 @@ def git_push_data_json(json_data):
     git_exe = find_git_executable()
     log.info(f"  Using git: {git_exe}")
 
-    # Read PAT
-    pat_file = CONFIG["pat_file"]
-    if not os.path.exists(pat_file):
-        log.error(f"PAT file not found: {pat_file}")
-        log.error("Create this file with the GitHub Personal Access Token as its only content.")
-        sys.exit(1)
-    with open(pat_file, 'r', encoding='utf-8') as f:
-        pat = f.read().strip()
-
-    repo_full = CONFIG["github_repo"]
-    push_url = f"https://x-access-token:{pat}@github.com/{repo_full}.git"
+    # ⚠ ΤΟ PUSH ΕΦΥΓΕ ΑΠΟ ΕΔΩ (13/08/2026). Η συνάρτηση κάνει πλέον ΜΟΝΟ
+    # commit· το push γίνεται ΜΕΤΑ το ανέβασμα στο Cloudflare, από το
+    # automation/git_targets.py. Λόγος: το Cloudflare είναι η πραγματική
+    # φιλοξενία (από εκεί διαβάζει και το labour tool) και το GitHub σβήνει
+    # στις 24/08/2026 — πρώτα φτάνει στον χρήστη, μετά καταγράφεται.
+    # Το PAT δεν διαβάζεται πια εδώ.
 
     def run(cmd, allow_fail=False):
         log.info(f"  $ git {' '.join(cmd[1:])}")
@@ -1342,46 +1342,41 @@ def git_push_data_json(json_data):
         cwd=repo
     )
     if diff.returncode == 0:
-        log.info("  No changes in data.json — skipping push.")
-        return
+        log.info("  No changes in data.json — nothing to commit.")
+        return False
 
     # Commit
     today = datetime.now().strftime('%Y-%m-%d %H:%M')
     latest = json_data['meta']['latest_date']
     commit_msg = f"Auto-update: data through {latest} (run {today})"
     run([git_exe, "commit", "-m", commit_msg])
+    log.info("  ✓ Committed locally. Push happens after the Cloudflare deploy.")
+    return True
 
-    # Push using PAT-injected URL with retry on transient failure
-    max_retries = CONFIG.get("push_max_retries", 3)
-    retry_delay = CONFIG.get("push_retry_delay", 120)
-    last_err = None
-    for attempt in range(1, max_retries + 1):
-        if attempt > 1:
-            log.info(f"  Retry attempt {attempt}/{max_retries} after {retry_delay}s wait...")
-            import time
-            time.sleep(retry_delay)
-        push_result = subprocess.run(
-            [git_exe, "push", push_url, "HEAD:main"],
-            cwd=repo, capture_output=True, text=True,
-            encoding='utf-8', errors='replace', timeout=120
-        )
-        # Mask the token in any logged output
-        masked_stdout = (push_result.stdout or "").replace(pat, "***TOKEN***")
-        masked_stderr = (push_result.stderr or "").replace(pat, "***TOKEN***")
-        if masked_stdout.strip():
-            log.info(f"    {masked_stdout.strip()}")
-        if masked_stderr.strip():
-            if push_result.returncode != 0:
-                log.warning(f"    {masked_stderr.strip()}")
-            else:
-                log.info(f"    {masked_stderr.strip()}")
-        if push_result.returncode == 0:
-            log.info("  ✓ Pushed to GitHub successfully.")
-            return  # SUCCESS — exit function
-        last_err = masked_stderr or masked_stdout
-        log.warning(f"  Push attempt {attempt} failed (exit {push_result.returncode}). {('Will retry...' if attempt < max_retries else 'Out of retries.')}")
-    log.error(f"All {max_retries} push attempts failed. Last error: {last_err[:200] if last_err else 'unknown'}")
-    sys.exit(1)
+
+def deploy_cloudflare():
+    """Ανεβάζει στο Cloudflare Pages — η ΠΡΑΓΜΑΤΙΚΗ φιλοξενία από 13/08/2026.
+
+    Έτρεχε ως ξεχωριστή γραμμή στο run_update.bat, ΜΕΤΑ το git push. Μπήκε
+    εδώ ώστε η σειρά (Cloudflare -> git) να είναι ρητή και σε ένα σημείο.
+
+    ⚠ ΔΕΝ ρίχνει το pipeline: τα δεδομένα είναι ήδη γραμμένα και commited
+    τοπικά. Αποτυχία ανεβάσματος πρέπει να φωνάζει, όχι να ακυρώνει τη μέρα.
+    """
+    log.info("=" * 60)
+    log.info("STEP 5: Deploying to Cloudflare Pages...")
+    dep = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deploy_cf_pages.py")
+    if not os.path.exists(dep):
+        log.error(f"  deploy_cf_pages.py not found at {dep} — ΤΟ DASHBOARD ΔΕΝ ΑΝΕΒΗΚΕ")
+        return False
+    r = subprocess.run([sys.executable, dep], capture_output=True, text=True,
+                       encoding='utf-8', errors='replace', timeout=900)
+    if r.returncode == 0:
+        log.info("  ✓ Cloudflare deploy OK")
+        return True
+    log.error(f"  Cloudflare deploy ΑΠΕΤΥΧΕ (exit {r.returncode})")
+    log.error(f"    {((r.stdout or '') + (r.stderr or '')).strip()[-400:]}")
+    return False
 
 
 def verify_deployment(json_data):
@@ -1729,11 +1724,25 @@ def main():
             budget = {}
         json_data = build_data_json(sales_data, budget, hourly_data=hourly_data)
 
-        # 4. Write + push (with retries)
-        git_push_data_json(json_data)
+        # 4. Write + commit locally (NO push yet — see git_targets.py)
+        committed = git_push_data_json(json_data)
 
-        # 5. Verify the deployment actually went live on GitHub Pages
+        # 5. Deploy to Cloudflare FIRST — that is the real hosting now.
+        #    Το labour tool διαβάζει από εκεί· ο χρήστης πρέπει να δει τα νέα
+        #    δεδομένα πριν ασχοληθούμε με το ιστορικό.
+        deploy_cloudflare()
+
+        # 6. Verify it actually went live (πλέον στο Cloudflare, όχι GitHub)
         verify_deployment(json_data)
+
+        # 7. Τώρα το ιστορικό: καθρέφτης πάντα, GitHub μέχρι 24/08/2026.
+        if committed:
+            try:
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                import git_targets
+                git_targets.push_all(CONFIG["repo_path"], log)
+            except Exception as e:
+                log.error(f"  [git] push απέτυχε: {e} (τα δεδομένα είναι ήδη ζωντανά)")
 
         elapsed = (datetime.now() - started).total_seconds()
         log.info("")

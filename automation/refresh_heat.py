@@ -189,37 +189,28 @@ def main():
         log.info('  --no-publish: γραφτηκε ΤΟΠΙΚΑ, χωρις git και χωρις deploy.')
         return 0
 
-    # ── git ──
+    # ── commit (ΧΩΡΙΣ push ακομα) ──
+    committed = False
     try:
         git_exe = find_git()
-        slug = github_slug(git_exe)
-        pat_file = os.path.join(REPO, '_work', '.github_pat')
-        with open(pat_file, encoding='utf-8') as fh:
-            pat = fh.read().strip()
         subprocess.run([git_exe, 'config', 'user.name', 'Auto-Update Bot'], cwd=REPO, check=True)
         subprocess.run([git_exe, 'config', 'user.email', 'auto@kfc.local'], cwd=REPO, check=True)
         subprocess.run([git_exe, 'add', 'data.json'], cwd=REPO, check=True)
         if subprocess.run([git_exe, 'diff', '--cached', '--quiet'], cwd=REPO).returncode == 0:
-            log.info('  git: καμια διαφορα — παραλειψη push')
+            log.info('  git: καμια διαφορα — χωρις commit')
         else:
             subprocess.run([git_exe, 'commit', '-m',
                             'Weather refresh: heat block through %s (%s)'
                             % (new.get('through'), datetime.now().strftime('%Y-%m-%d %H:%M'))],
                            cwd=REPO, check=True)
-            p = subprocess.run([git_exe, 'push',
-                                'https://x-access-token:%s@github.com/%s.git' % (pat, slug),
-                                'HEAD:main'],
-                               cwd=REPO, capture_output=True, text=True,
-                               encoding='utf-8', errors='replace', timeout=180)
-            out = ((p.stdout or '') + (p.stderr or '')).replace(pat, '***TOKEN***').strip()
-            if p.returncode == 0:
-                log.info('  ✓ push OK  %s', out.splitlines()[-1] if out else '')
-            else:
-                log.error('  push ΑΠΕΤΥΧΕ: %s', out)
+            committed = True
     except Exception as e:
-        log.error('  git: %s (το data.json ειναι γραμμενο τοπικα)', e)
+        log.error('  git commit: %s (το data.json ειναι γραμμενο τοπικα)', e)
 
-    # ── Cloudflare Pages ──
+    # ── Cloudflare Pages — ΠΡΩΤΑ ─────────────────────────────────────────
+    # ⚠ Η ΣΕΙΡΑ ΑΛΛΑΞΕ (13/08/2026): το Cloudflare ειναι πλεον η ΠΡΑΓΜΑΤΙΚΗ
+    # φιλοξενια — απο εκει διαβαζει και το labour tool. Το git ειναι ιστορικο.
+    # Πρωτα φτανει στον χρηστη, μετα καταγραφεται.
     dep = os.path.join(HERE, 'deploy_cf_pages.py')
     if os.path.exists(dep):
         r = subprocess.run([sys.executable, dep], capture_output=True, text=True,
@@ -229,6 +220,14 @@ def main():
             log.error('    %s', ((r.stdout or '') + (r.stderr or '')).strip()[-500:])
     else:
         log.warning('  δεν βρεθηκε deploy_cf_pages.py')
+
+    # ── git push — ΜΕΤΑ, σε καθρεφτη + (μεχρι 24/08) GitHub ───────────────
+    if committed:
+        try:
+            import git_targets
+            git_targets.push_all(REPO, log)
+        except Exception as e:
+            log.error('  git push: %s (το commit εγινε τοπικα)', e)
 
     log.info('=== ΤΕΛΟΣ ===')
     return 0
