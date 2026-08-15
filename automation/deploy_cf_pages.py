@@ -38,8 +38,8 @@ GATE_GET_NEW = 'if (localStorage.getItem(__SESSION_KEY__) === "1" || sessionStor
 GATE_ANCHOR = 'try { sessionStorage.setItem(__SESSION_KEY__, "1"); } catch(e) {}'
 GATE_HOOK = ('\n      try { localStorage.setItem(__SESSION_KEY__, "1"); } catch(e) {}'
              '\n      try { localStorage.setItem("tb_agent_pw", pw); } catch(e) {}')
-SW_OLD_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v16';"
-SW_NEW_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v17';  // v17: Cloudflare (persino sima gemato)"
+SW_OLD_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v17';"
+SW_NEW_VERSION = "const CACHE_VERSION = 'tacobell-dashboard-v18';  // v18: Cloudflare (diplo periodos)"
 SW_SHELL_ANCHOR = "  './index.html',"
 
 LOG_FILE = REPO / "_work" / "cf_deploy.log"

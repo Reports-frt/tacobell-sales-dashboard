@@ -3278,9 +3278,11 @@ function renderKPI(R) {
     if (hm) {
       const fmtList = (arr) => arr.length ? arr.join(", ") : "καμία αντίστοιχη";
       let parts = [];
-      if (hm.onlyCY.length) parts.push(`<strong>φέτος</strong> περιέχει: ${fmtList(hm.onlyCY)} — πέρσι όχι`);
+      // ⚠ ΚΑΘΕ ΣΚΕΛΟΣ ΑΥΤΟΤΕΛΕΣ. Το κοινό πρόθεμα «η περίοδος» ίσχυε μόνο για
+      // το πρώτο· με το δεύτερο έβγαινε «η περίοδος η περσινή περίοδος είχε…».
+      if (hm.onlyCY.length) parts.push(`η <strong>φετινή</strong> περίοδος περιέχει: ${fmtList(hm.onlyCY)} — πέρσι όχι`);
       if (hm.onlyLY.length) parts.push(`η <strong>περσινή</strong> περίοδος είχε: ${fmtList(hm.onlyLY)} — φέτος όχι`);
-      hmEl.innerHTML = `<span class="hm-icon">🎉</span> <strong>Προσοχή στο vs LY:</strong> η περίοδος ${parts.join(" · ")}. Οι αργίες μετατοπίζουν πωλήσεις και επηρεάζουν τη σύγκριση.`;
+      hmEl.innerHTML = `<span class="hm-icon">🎉</span> <strong>Προσοχή στο vs LY:</strong> ${parts.join(" · ")}. Οι αργίες μετατοπίζουν πωλήσεις και επηρεάζουν τη σύγκριση.`;
       hmEl.style.display = "block";
     } else {
       hmEl.style.display = "none";

@@ -7,7 +7,7 @@
 //   - Icons & manifest: cache-first
 // =====================================================================
 
-const CACHE_VERSION = 'tacobell-dashboard-v16';  // v16: persino sima gemato -> hover (index.html allakse)
+const CACHE_VERSION = 'tacobell-dashboard-v17';  // v17: diplo «periodos» sto vs LY (index.html allakse)
 const APP_SHELL = [
   './',
   './index.html',
